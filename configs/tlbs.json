@@ -1,0 +1,53 @@
+{
+  "name": "tlbs,",
+  "ITLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+  "DTLB": {
+    "sets": 16,
+    "ways": 4,
+    "rq_size": 16,
+    "wq_size": 16,
+    "pq_size": 0,
+    "mshr_size": 8,
+    "latency": 1,
+    "max_tag_check": 2,
+    "max_fill": 2,
+    "prefetch_as_load": false
+  },
+  "STLB": {
+    "sets": 128,
+    "ways": 12,
+    "rq_size": 32,
+    "wq_size": 32,
+    "pq_size": 0,
+    "mshr_size": 16,
+    "latency": 8,
+    "max_tag_check": 1,
+    "max_fill": 1,
+    "prefetch_as_load": false
+  },
+  "PTW": {
+    "pscl5_set": 1,
+    "pscl5_way": 2,
+    "pscl4_set": 1,
+    "pscl4_way": 4,
+    "pscl3_set": 2,
+    "pscl3_way": 4,
+    "pscl2_set": 4,
+    "pscl2_way": 8,
+    "rq_size": 16,
+    "mshr_size": 5,
+    "max_read": 2,
+    "max_write": 2
+  }
+}
