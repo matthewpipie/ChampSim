@@ -1,4 +1,5 @@
 ns="1 4"
+#ns="4"
 
 for n in $ns; do
     echo "starting n=$n"
@@ -24,7 +25,7 @@ for n in $ns; do
 
     cores="core.$n.v1..json"
     llcs="llc.$n.v1..json"
-    memories="memory.$n.v1..json"
+    memories="memory.$n.v1..json memory.$n.v1.bandwidth--4x.json"
     tlbs="tlbs.n.v1..json"
 
     configdir="configs"
