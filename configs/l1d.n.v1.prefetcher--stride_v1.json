@@ -1,19 +1,19 @@
 {
-  "name": "l1i.32K.drrip.next_line,",
-  "L1I": {
+  "name": "l1d.n.v1.prefetcher--stride_v1,",
+  "L1D": {
     "sets": 64,
-    "ways": 8,
+    "ways": 12,
     "rq_size": 64,
     "wq_size": 64,
-    "pq_size": 32,
-    "mshr_size": 8,
-    "latency": 4,
+    "pq_size": 8,
+    "mshr_size": 16,
+    "latency": 5,
     "max_tag_check": 2,
     "max_fill": 2,
     "prefetch_as_load": false,
-    "virtual_prefetch": true,
+    "virtual_prefetch": false,
     "prefetch_activate": "LOAD,PREFETCH",
-    "prefetcher": "next_line",
+    "prefetcher": "stride_v1",
     "replacement": "drrip"
   }
 }

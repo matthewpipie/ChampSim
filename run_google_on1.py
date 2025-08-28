@@ -14,14 +14,14 @@ ncores = int(sys.argv[2])
 executable_name = executable.name
 
 BASE_DIR = "/mnt/storage/traces/gtrace_v2_champsim_1.5Binstr_round4core/"
-OUT_DIR = f"results_4/{executable_name}"
+OUT_DIR = f"results_1/{executable_name}"
 
 workloads = "arizona bravo.a charlie delta merced sierra.a.3 sierra.a.4 sierra.a.6 tahoe tango whiskey yankee".split(" ")
 
 WARMUP = 200000000
 SIMTIME = 1000000000
 
-N_CORES_PER_PROCESS = 4
+N_CORES_PER_PROCESS = 1
 
 ECHO_ONLY = False
 

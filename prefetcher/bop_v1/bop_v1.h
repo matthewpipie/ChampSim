@@ -1,5 +1,5 @@
-#ifndef PREFETCHER_NEWBOP_H
-#define PREFETCHER_NEWBOP_H
+#ifndef PREFETCHER_BOP_V1_H
+#define PREFETCHER_BOP_V1_H
 
 #include <cstdint>
 
@@ -7,7 +7,7 @@
 #include "address.h"
 #include "modules.h"
 
-struct newbop : public champsim::modules::prefetcher {
+struct bop_v1 : public champsim::modules::prefetcher {
   using prefetcher::prefetcher;
   uint32_t prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                     uint32_t metadata_in);

@@ -1,8 +1,8 @@
-#include "newstride.h"
+#include "stride_v1.h"
 #include <vector>
 #include <iostream>
 
-uint32_t newstride::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t stride_v1::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in)
 {
   //champsim::block_number pf_addr{addr};
@@ -21,18 +21,18 @@ uint32_t newstride::prefetcher_cache_operate(champsim::address addr, champsim::a
   return metadata_in;
 }
 
-uint32_t newstride::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t stride_v1::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
     // void register_fill(uint64_t address);
   //stride->register_fill(addr.to<uint64_t>());
   return metadata_in;
 }
 
-void newstride::prefetcher_initialize()
+void stride_v1::prefetcher_initialize()
 {
     stride = new StridePrefetcher();
 }
 
-void newstride::prefetcher_final_stats() {
+void stride_v1::prefetcher_final_stats() {
     stride->dump_stats();
 }

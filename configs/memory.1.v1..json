@@ -1,0 +1,21 @@
+{
+  "name": "memory.1.v1.,",
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 2,
+    "banks": 4,
+    "bank_rows": 1048576,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 6,
+    "tRCD": 6,
+    "tRP": 6,
+    "tRAS": 13,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  }
+}
