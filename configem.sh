@@ -25,7 +25,7 @@ for n in $ns; do
 
     cores="core.$n.v1..json"
     llcs="llc.$n.v1..json"
-    memories="memory.$n.v1..json memory.$n.v1.bandwidth--4x.json"
+    memories="memory.$n.v2..json memory.$n.v2.bandwidth--4x.json"
     tlbs="tlbs.n.v1..json"
 
     configdir="configs"
@@ -37,9 +37,10 @@ for n in $ns; do
                     for llc in $llcs; do
                         for memory in $memories; do
                             for tlb in $tlbs; do
-                                echo ./config.sh "$configdir/$core" "$configdir/$l1i" "$configdir/$l1d" "$configdir/$l2c" "$configdir/$llc" "$configdir/$memory" "$configdir/$tlb"
-                                ./config.sh "$configdir/$core" "$configdir/$l1i" "$configdir/$l1d" "$configdir/$l2c" "$configdir/$llc" "$configdir/$memory" "$configdir/$tlb"
-                                make -j
+                                #echo ./config.sh "$configdir/$core" "$configdir/$l1i" "$configdir/$l1d" "$configdir/$l2c" "$configdir/$llc" "$configdir/$memory" "$configdir/$tlb"
+                                #./config.sh "$configdir/$core" "$configdir/$l1i" "$configdir/$l1d" "$configdir/$l2c" "$configdir/$llc" "$configdir/$memory" "$configdir/$tlb"
+                                #make -j
+                                ./build.py "$configdir/$core" "$configdir/$l1i" "$configdir/$l1d" "$configdir/$l2c" "$configdir/$llc" "$configdir/$memory" "$configdir/$tlb"
                             done
                         done
                     done
