@@ -14,7 +14,7 @@ ncores = int(sys.argv[2])
 executable_name = executable.name
 
 BASE_DIR = "/mnt/storage/traces/spectrace/speccpu/"
-OUT_DIR = f"results_4_spec/{executable_name}"
+OUT_DIR = f"results_1_spec/{executable_name}"
 
 #workloads = "arizona bravo.a charlie delta merced sierra.a.3 sierra.a.4 sierra.a.6 tahoe tango whiskey yankee".split(" ")
 BASE_DIR_PATH = Path(BASE_DIR)
@@ -23,7 +23,7 @@ workloads = list(filter(lambda x: x.is_dir(), list(BASE_DIR_PATH.glob("*"))))
 WARMUP = 200000000
 SIMTIME = 1000000000
 
-N_CORES_PER_PROCESS = 4
+N_CORES_PER_PROCESS = 1
 
 ECHO_ONLY = False
 

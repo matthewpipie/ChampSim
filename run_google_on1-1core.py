@@ -13,17 +13,15 @@ executable = Path(sys.argv[1])
 ncores = int(sys.argv[2])
 executable_name = executable.name
 
-BASE_DIR = "/mnt/storage/traces/spectrace/speccpu/"
-OUT_DIR = f"results_4_spec/{executable_name}"
+BASE_DIR = "/mnt/storage/traces/gtrace_v2_champsim_1.5Binstr_1core/"
+OUT_DIR = f"results_1-1core/{executable_name}"
 
-#workloads = "arizona bravo.a charlie delta merced sierra.a.3 sierra.a.4 sierra.a.6 tahoe tango whiskey yankee".split(" ")
-BASE_DIR_PATH = Path(BASE_DIR)
-workloads = list(filter(lambda x: x.is_dir(), list(BASE_DIR_PATH.glob("*"))))
+workloads = "arizona bravo.a charlie delta merced sierra.a.3 sierra.a.4 sierra.a.6 tahoe tango whiskey yankee".split(" ")
 
 WARMUP = 200000000
 SIMTIME = 1000000000
 
-N_CORES_PER_PROCESS = 4
+N_CORES_PER_PROCESS = 1
 
 ECHO_ONLY = False
 
@@ -31,11 +29,8 @@ commands = []
 
 for workload in workloads:
     # get trace files
-    trace_files_all = sorted(list((Path(BASE_DIR) / workload).glob("*.gz")), key = lambda x:
-            int(x.name.split("-")[1].split("B")[0]))
-    trace_files = []
-    for i in range(N_CORES_PER_PROCESS):
-        trace_files.append(trace_files_all[0])
+    trace_files = sorted(list((Path(BASE_DIR) / workload).glob("*.gz")), key = lambda x:
+            int(x.name.split("_")[1].split(".")[0]))
     for i, trace_file_batch in enumerate(list(grouper(trace_files, N_CORES_PER_PROCESS, incomplete="strict"))):
         command = []
         command.append(executable.absolute())
