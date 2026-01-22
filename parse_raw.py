@@ -4,6 +4,7 @@ import os
 import sys
 import json
 from pathlib import Path
+from file_read_backwards import FileReadBackwards
 
 if len(sys.argv) <= 2:
     print("syntax: ./file.py <input folders> <workload suite source>")
@@ -14,8 +15,15 @@ suite = sys.argv[-1]
 #filter_caches = ["LLC", "L1D", "L2C"]
 filter_caches = False
 
+def mean(l):
+    return sum(l) / len(l)
+
+def median(l):
+    return sorted(l)[len(l)//2]
+
 def parse_one_output_file(fi, metadata):
-    active = False
+    active = 0
+    trace_infos = {}
     cores_ret = {}
     caches_ret = {}
     total_missed_reads = {}
@@ -25,30 +33,197 @@ def parse_one_output_file(fi, metadata):
         for line in f:
             line = line.strip()
 
+            if line.startswith("=== Simulation ==="):
+                active = 1
+            if active == 0: continue
+
+            match = re.search(r"CPU (\d+) runs (.+)", line)
+            if match:
+                cpu = int(match.group(1))
+                simulation_file_path = match.group(2)
+                match = re.search(r".+(_(\d+)\.champsim\.gz)", line)
+                if match:
+                    simulation_file = Path(simulation_file_path)
+                    logfile = simulation_file.with_name(simulation_file.name.replace(match.group(1), ".log"))
+                    prefix="1.5Binstr"
+                    logfile_ideal = str(logfile.absolute()).replace(prefix, "forever")
+                    logfile_sharing = str(logfile.absolute()).replace(prefix, "100M_mem_sharing_info")
+                    logfile_pt = str(logfile.absolute()).replace(prefix, "forever_withtid2")
+                    if "perthread" in str(logfile.absolute()) or True: # tmp, cannot figure out rn
+                        logfile_tids = None
+                        switch_times = [1]
+                    else:
+                        logfile_tids = str(logfile.absolute()).replace(prefix, "forever_withtid")
+                    scheduled_coreid = int(match.group(2))
+                    instructions_processed = None
+                    instructions_processed_ideal = None
+                    with FileReadBackwards(str(logfile.absolute()), encoding="ascii") as logf:
+                        for logline in logf:
+                            if logline.startswith("Thread"):
+                                match = re.search(f"Thread {scheduled_coreid} processed (-?\d+) instructions", logline)
+                                if match:
+                                    instructions_processed = match.group(1)
+                                    break
+                    if logfile.lstat().st_size == 0:
+                        print(f"Empty conversion file: {logfile}", file=sys.stderr)
+                        pass
+                    elif instructions_processed is None:
+                        print(f"Conversion crashed: {logfile}", file=sys.stderr)
+                        #raise Exception(fi, line, logfile, scheduled_coreid)
+
+                    with FileReadBackwards(logfile_ideal, encoding="ascii") as logf:
+                    #with open(logfile_ideal, "r") as logf:
+                        for logline in logf:
+                            if logline.startswith("Thread"):
+                                match = re.search(f"Thread {scheduled_coreid} processed (-?\d+) instructions", logline)
+                                if match:
+                                    instructions_processed_ideal = match.group(1)
+                                    break
+                    if Path(logfile_ideal).lstat().st_size == 0:
+                        print(f"Empty conversion file: {logfile}", file=sys.stderr)
+                        pass
+                    elif instructions_processed_ideal is None:
+                        print(f"Ideal conversion crashed: {logfile}", file=sys.stderr)
+                        #raise Exception(fi, line, logfile, scheduled_coreid)
+                    if logfile_tids is not None:
+                        #print(logfile_tids)
+                        switch_times = []
+                        with open(logfile_tids, "r") as logf:
+                            looking_start = f"***{scheduled_coreid},"
+                            for logline in logf:
+                                if logline.startswith(looking_start):
+                                    if "Processed" in logline: continue
+                                    splitt = logline.split(",")
+                                    instr = int(splitt[1])
+                                    #tid = int(splitt[2])
+                                    switch_times.append(instr)
+                    if instructions_processed is not None and instructions_processed_ideal is not None:
+                        switch_times_diff = []
+                        switch_times_diff_ideal = []
+                        last = 0
+                        for i in range(len(switch_times)-1):
+                            switch_times_diff_ideal.append(switch_times[i+1] - switch_times[i])
+                            if switch_times[i+1] < int(instructions_processed):
+                                last = i+1
+                                switch_times_diff.append(switch_times[i+1] - switch_times[i])
+
+                        # close it out
+                        if len(switch_times) == 0:
+                            switch_times_diff = [0]
+                            switch_times_diff_ideal = [0]
+                        else:
+                            switch_times_diff.append(int(instructions_processed) - switch_times[last])
+                            switch_times_diff_ideal.append(int(instructions_processed_ideal) - switch_times[-1])
+                    else:
+                        switch_times_diff = [0]
+                        switch_times_diff_ideal = [0]
+                    threads_in_100M_core_info = {}
+                    if Path(logfile_sharing).exists():
+                        sharing_data = Path(logfile_sharing).read_text()
+                        # look line by line for this core number
+                        hot = False
+                        for line in sharing_data.split("\n"):
+                            if hot:
+                                if line.startswith("Total threads:"):
+                                    threads_in_100M_core_info["total threads"] = int(line.split(":")[1])
+                                elif line.startswith("Total context switches:"):
+                                    threads_in_100M_core_info["total context switches"] = int(line.split(":")[1])
+                                elif line.startswith("Total unique cachelines:"):
+                                    threads_in_100M_core_info["total unique cachelines"] = int(line.split(":")[1])
+                                elif line.startswith("Total accesses:"):
+                                    threads_in_100M_core_info["total accesses"] = int(line.split(":")[1])
+                                elif line.startswith("Shared cachelines:"):
+                                    threads_in_100M_core_info["shared cachelines raw"] = int(line.split(":")[1].split("(")[0])
+                                    threads_in_100M_core_info["shared cachelines percent"] = float(line.split("(")[1].split("%")[0]) / 100 # convert to 0->1 scale
+                                elif line.startswith("Average threads/cline:"):
+                                    threads_in_100M_core_info["average threads/cline"] = float(line.split(":")[1])
+                                elif line.startswith("Average accesses/cline:"):
+                                    threads_in_100M_core_info["average accesses/cline"] = float(line.split(":")[1])
+                                elif line.startswith("Average accesses/thread:"):
+                                    threads_in_100M_core_info["average accesses/thread"] = float(line.split(":")[1])
+                                    break
+#Total threads:             19
+#Total context switches:    121
+#Total unique cachelines:   339986
+#Total accesses:            39839119
+#Shared cachelines:         3803 (1.12%)
+#Average threads/cline:     1.02
+#Average accesses/cline:    117.18
+#Average accesses/thread:   2096795.74
+
+                            elif line.startswith(f"=== Memory Sharing Statistics for core {scheduled_coreid}==="):
+                                hot = True
+
+
+                    trace_infos[cpu] = {
+                        "file": simulation_file_path,
+                        "was_converted": True,
+                        "conversion_log": str(logfile),
+                        "converted_instructions": instructions_processed,
+                        "converted_instructions_ideal": instructions_processed_ideal,
+                        "ctx_switches": len(switch_times_diff),
+                        "ctx_switches_ideal": len(switch_times_diff_ideal),
+                        "avg_thread_len": mean(switch_times_diff),
+                        "avg_thread_len_ideal": mean(switch_times_diff_ideal),
+                        "med_thread_len": median(switch_times_diff),
+                        "med_thread_len_ideal": median(switch_times_diff_ideal),
+                        "threads_in_100M_core_info": threads_in_100M_core_info,
+                        "logfile_pt": logfile_pt,
+                    }
+                else:
+                    trace_infos[cpu] = {
+                        "file": simulation_file_path,
+                        "was_converted": False,
+                    }
+            # /mnt/storage/traces/gtrace_v2_champsim_perthread_1.5Binstr/arizona/16362031984258116688.2763650.memtrace_0000.champsim.gz
+
             if line.startswith("Region of Interest Statistics"):
-                active = True
-            if not active: continue
+                active = 2
+            if active == 1: continue
 
             match = re.search(r"CPU (\d+) cumulative IPC: ([\d.]+) instructions: (\d+) cycles: (\d+)", line)
             if match:
                 cpu = int(match.group(1))
+                instructions = int(match.group(3))
                 cores_ret[cpu] = {
                         "core": cpu,
                         "cumulative_IPC": float(match.group(2)),
-                        "instructions": int(match.group(3)),
+                        "instructions": instructions,
                         "cycles": int(match.group(4)),
                         "branch_predictor": {},
                 }
-            match = re.search(r"CPU (\d+) Branch Prediction Accuracy: ([\d.]+)% MPKI: ([\d.]+) Average ROB Occupancy at Mispredict: ([\d.]+)", line)
+                    
+            match = re.search(r"CPU (\d+) Branch Prediction Accuracy: ([\d.]+)% MPKI: ([\d.]+) Average ROB Occupancy at Mispredict: ([-\d.]+)", line)
             if match:
                 assert(int(match.group(1)) == cpu)
                 cores_ret[cpu]["branch_predictor"]["branch_prediction_accuracy"] = float(match.group(2)) / 100
                 cores_ret[cpu]["branch_predictor"]["branch_MPKI"] = float(match.group(3))
-                cores_ret[cpu]["branch_predictor"]["average_ROB_occupancy_at_mispredict"] = float(match.group(4))
+                try:
+                    cores_ret[cpu]["branch_predictor"]["average_ROB_occupancy_at_mispredict"] = float(match.group(4))
+                except ValueError:
+                    cores_ret[cpu]["branch_predictor"]["average_ROB_occupancy_at_mispredict"] = float(0)
             match = re.search(r"^([A-Z_]+): ([\d.]+)", line)
             if match:
                 bname = match.group(1)
                 cores_ret[cpu]["branch_predictor"][f"mpki_{bname}"] = float(match.group(2))
+
+            match = re.search(r"^CPU \d+ Portion (\w+): (\d+): (\d+)$", line)
+            if match:
+                portion = match.group(1)
+                if "portion_distribution" not in cores_ret[cpu]:
+                    cores_ret[cpu]["portion_distribution"] = {}
+                if portion not in cores_ret[cpu]["portion_distribution"]:
+                    cores_ret[cpu]["portion_distribution"][portion] = {}
+                cores_ret[cpu]["portion_distribution"][portion][match.group(2)] = int(match.group(3))
+
+            match = re.search(r"^CPU \d+ Buffer (\w+): (\d+): (\d+)$", line)
+            if match:
+                buffer = match.group(1)
+                if "buffer_distribution" not in cores_ret[cpu]:
+                    cores_ret[cpu]["buffer_distribution"] = {}
+                if buffer not in cores_ret[cpu]["buffer_distribution"]:
+                    cores_ret[cpu]["buffer_distribution"][buffer] = {}
+                cores_ret[cpu]["buffer_distribution"][buffer][f"{int(match.group(2)):03d}"] = int(match.group(3))
 
             match = re.search(r"^(cpu(\d+)->(\w+)) (\w+)\s+ACCESS:\s+(\d+) HIT:\s+(\d+) MISS:\s+(\d+) MSHR_MERGE:\s+(\d+)", line)
             if match:
@@ -181,6 +356,7 @@ def parse_one_output_file(fi, metadata):
 
     for (coreid, core) in cores_ret.items():
         core["caches"] = {}
+        core["trace_info"] = trace_infos[coreid]
         for (cname, cdata) in caches_ret.items():
             if coreid in cdata["source"]:
                 core["caches"][cdata["cache_type"]] = cdata
@@ -234,14 +410,17 @@ def parse_champsim_config(dir_name):
         elif len(comma) == 0:
             pass
         else:
-            print("ERROR PARSIN CHAMPSIM CONFIG")
-            print(comma)
-            sys.exit(1)
+            #print("ERROR PARSIN CHAMPSIM CONFIG")
+            #print(comma)
+            #sys.exit(1)
+            return parse_champsim_config("champsim_core.UNKNOWN.UNKNOWN.UNKNOWN,_l1i.UNKNOWN.UNKNOWN.UNKNOWN,_l1d.UNKNOWN.UNKNOWN.UNKNOWN,_l2c.UNKNOWN.UNKNOWN.UNKNOWN,_llc.UNKNOWN.UNKNOWN.UNKNOWN,_memory.UNKNOWN.UNKNOWN.UNKNOWN,_tlbs.UNKNOWN.UNKNOWN.UNKNOWN")
     return ret
 
 def parse_filename(file_name): 
     ret = {"filename_raw_no_commas": file_name.replace(",","_")}
+    #print(file_name)
     commas = file_name[:-len(".raw")].split(",")
+    #print(commas)
     ret["workload"] = commas[0]
     ret["run_num"] = int(commas[1])
     ret["cores_per_run"] = int(commas[2])
@@ -254,6 +433,7 @@ for fi in input_files:
         raise Exception("needs dir")
     champsim_config = Path(fi).name
     cfg_dict = parse_champsim_config(champsim_config)
+    #print(fi)
     for fi2 in Path(fi).glob("*"):
         meta = parse_filename(Path(fi2).name)
         meta |= {"champsim_config": cfg_dict, "suite": suite}

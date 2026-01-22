@@ -149,6 +149,10 @@ public:
   long operate() final;
   void begin_phase() final;
   void end_phase(unsigned cpu) final;
+  
+  void store_buffer_lengths(size_t size, cpu_buffer buffer);
+  void store_all_buffer_lengths();
+  long add_progress(long progress, cpu_portion portion);
 
   void initialize_instruction();
   long check_dib();
@@ -192,7 +196,7 @@ public:
 
     virtual void impl_initialize_branch_predictor() = 0;
     virtual void impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) = 0;
-    virtual bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type) = 0;
+    virtual bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) = 0;
   };
 
   struct btb_module_concept {
@@ -200,7 +204,7 @@ public:
 
     virtual void impl_initialize_btb() = 0;
     virtual void impl_update_btb(champsim::address ip, champsim::address predicted_target, bool taken, uint8_t branch_type) = 0;
-    virtual std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type) = 0;
+    virtual std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type, champsim::address cheating_branch_target) = 0;
   };
 
   template <typename... Bs>
@@ -210,7 +214,7 @@ public:
 
     void impl_initialize_branch_predictor() final;
     void impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) final;
-    [[nodiscard]] bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type) final;
+    [[nodiscard]] bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) final;
   };
 
   template <typename... Ts>
@@ -220,7 +224,7 @@ public:
 
     void impl_initialize_btb() final;
     void impl_update_btb(champsim::address ip, champsim::address predicted_target, bool taken, uint8_t branch_type) final;
-    [[nodiscard]] std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type) final;
+    [[nodiscard]] std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type, champsim::address cheating_branch_target) final;
   };
 
   std::unique_ptr<branch_module_concept> branch_module_pimpl;
@@ -229,11 +233,11 @@ public:
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks
   void impl_initialize_branch_predictor() const;
   void impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) const;
-  [[nodiscard]] bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type) const;
+  [[nodiscard]] bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) const;
 
   void impl_initialize_btb() const;
   void impl_update_btb(champsim::address ip, champsim::address predicted_target, bool taken, uint8_t branch_type) const;
-  [[nodiscard]] std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type) const;
+  [[nodiscard]] std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type, champsim::address cheating_branch_target) const;
   // NOLINTEND(readability-make-member-function-const)
 
   template <typename... Bs, typename... Ts>
@@ -281,11 +285,15 @@ void O3_CPU::branch_module_model<Bs...>::impl_last_branch_result(champsim::addre
 }
 
 template <typename... Bs>
-bool O3_CPU::branch_module_model<Bs...>::impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type)
+bool O3_CPU::branch_module_model<Bs...>::impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken)
 {
   using return_type = bool;
   [[maybe_unused]] auto process_one = [&](auto& b) {
     using namespace champsim::modules;
+    /* Strong addresses, full size, Cheating */
+    if constexpr (branch_predictor::has_predict_branch<decltype(b), champsim::address, champsim::address, bool, uint8_t, bool>)
+      return return_type{b.predict_branch(ip, predicted_target, always_taken, branch_type, cheating_branch_taken)};
+
     /* Strong addresses, full size */
     if constexpr (branch_predictor::has_predict_branch<decltype(b), champsim::address, champsim::address, bool, uint8_t>)
       return return_type{b.predict_branch(ip, predicted_target, always_taken, branch_type)};
@@ -338,11 +346,15 @@ void O3_CPU::btb_module_model<Ts...>::impl_update_btb(champsim::address ip, cham
 }
 
 template <typename... Ts>
-std::pair<champsim::address, bool> O3_CPU::btb_module_model<Ts...>::impl_btb_prediction(champsim::address ip, uint8_t branch_type)
+std::pair<champsim::address, bool> O3_CPU::btb_module_model<Ts...>::impl_btb_prediction(champsim::address ip, uint8_t branch_type, champsim::address cheating_branch_target)
 {
   using return_type = std::pair<champsim::address, bool>;
   [[maybe_unused]] auto process_one = [&](auto& t) {
     using namespace champsim::modules;
+
+    /* Strong addresses, full size, cheating */
+    if constexpr (btb::has_btb_prediction<decltype(t), champsim::address, uint8_t, champsim::address>)
+      return return_type{t.btb_prediction(ip, branch_type, cheating_branch_target)};
 
     /* Strong addresses, full size */
     if constexpr (btb::has_btb_prediction<decltype(t), champsim::address, uint8_t>)

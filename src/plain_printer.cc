@@ -51,15 +51,49 @@ std::vector<std::string> champsim::plain_printer::format(O3_CPU::stats_type stat
   lines.push_back(fmt::format("{} cumulative IPC: {} instructions: {} cycles: {}", stats.name, ::print_ratio(stats.instrs(), stats.cycles()), stats.instrs(),
                               stats.cycles()));
 
-  lines.push_back(fmt::format("{} Branch Prediction Accuracy: {}% MPKI: {} Average ROB Occupancy at Mispredict: {}", stats.name,
+  lines.push_back(fmt::format("{} Branch Prediction Accuracy: {}% MPKI: {} Average ROB Occupancy at Mispredict: {} BTB Misses: {} Branches: {} Mispredicted: {}", stats.name,
                               ::print_ratio(100 * (total_branch - total_mispredictions), total_branch),
                               ::print_ratio(std::kilo::num * total_mispredictions, stats.instrs()),
-                              ::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions)));
+                              ::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions),
+                              stats.btb_misses, total_branch, total_mispredictions));
 
   lines.emplace_back("Branch type MPKI");
   for (auto idx : types) {
     lines.push_back(fmt::format("{}: {}", branch_type_names.at(champsim::to_underlying(idx)),
                                 ::print_ratio(std::kilo::num * stats.branch_type_misses.value_or(idx, 0), stats.instrs())));
+  }
+
+  constexpr std::array portion_types{
+    cpu_portion::RetireROB,
+    cpu_portion::CompleteInflightInstruction,
+    cpu_portion::ExecuteInstruction,
+    cpu_portion::ScheduleInstruction,
+    cpu_portion::HandleMemoryReturn,
+    cpu_portion::OperateLSQ,
+    cpu_portion::DispatchInstruction,
+    cpu_portion::DecodeInstruction,
+    cpu_portion::PromoteToDecode,
+    cpu_portion::FetchInstruction,
+    cpu_portion::CheckDIB,
+  };
+  for (auto portion : portion_types) {
+    for (auto pair : stats.cpu_portion_distributions[portion]) {
+        lines.push_back(fmt::format("{} Portion {}: {}: {}", stats.name, cpu_portion_names[portion], pair.first, pair.second));
+    }
+  }
+  constexpr std::array buffer_types{
+    cpu_buffer::IFETCH_B,
+    cpu_buffer::DISPATCH_B,
+    cpu_buffer::DECODE_B,
+    cpu_buffer::RO_B,
+    cpu_buffer::DIB_HIT_B,
+    cpu_buffer::LOAD_B,
+    cpu_buffer::STORE_B,
+  };
+  for (auto buffer : buffer_types) {
+    for (auto pair : stats.cpu_buffer_distributions[buffer]) {
+        lines.push_back(fmt::format("{} Buffer {}: {}: {}", stats.name, cpu_buffer_names[buffer], pair.first, pair.second));
+    }
   }
 
   return lines;

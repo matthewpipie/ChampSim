@@ -573,6 +573,9 @@ long CACHE::invalidate_entry(champsim::address inval_addr)
   return std::distance(begin, inv_way);
 }
 
+bool CACHE::can_prefetch_line() {
+  return std::size(internal_PQ) < PQ_SIZE;
+}
 bool CACHE::prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata)
 {
   ++sim_stats.pf_requested;

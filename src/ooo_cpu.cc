@@ -32,25 +32,47 @@
 
 std::chrono::seconds elapsed_time();
 
-constexpr long long STAT_PRINTING_PERIOD = 10000000;
+constexpr long long STAT_PRINTING_PERIOD = 100000;
+
+void O3_CPU::store_buffer_lengths(size_t size, cpu_buffer buffer) {
+    auto &inner_map = sim_stats.cpu_buffer_distributions[buffer];
+    inner_map[size]++;
+}
+void O3_CPU::store_all_buffer_lengths() {
+    store_buffer_lengths(IFETCH_BUFFER.size(), IFETCH_B);
+    store_buffer_lengths(DISPATCH_BUFFER.size(), DISPATCH_B);
+    store_buffer_lengths(DECODE_BUFFER.size(), DECODE_B);
+    store_buffer_lengths(ROB.size(), RO_B);
+    store_buffer_lengths(DIB_HIT_BUFFER.size(), DIB_HIT_B);
+    store_buffer_lengths((std::size_t)std::count_if(std::begin(LQ), std::end(LQ), [](const auto& lq_entry) { return lq_entry.has_value(); }), LOAD_B);
+    store_buffer_lengths(SQ.size(), STORE_B);
+}
+
+long O3_CPU::add_progress(long progress, cpu_portion portion) {
+    auto &inner_map = sim_stats.cpu_portion_distributions[portion];
+    inner_map[progress]++;
+    return progress;
+}
 
 long O3_CPU::operate()
 {
   long progress{0};
-  progress += retire_rob();                    // retire
-  progress += complete_inflight_instruction(); // finalize execution
-  progress += execute_instruction();           // execute instructions
-  progress += schedule_instruction();          // schedule instructions
-  progress += handle_memory_return();          // finalize memory transactions
-  progress += operate_lsq();                   // execute memory transactions
+  progress += add_progress(retire_rob(), RetireROB);                    // retire
+  progress += add_progress(complete_inflight_instruction(), CompleteInflightInstruction); // finalize execution
+  progress += add_progress(execute_instruction(), ExecuteInstruction);           // execute instructions
+  progress += add_progress(schedule_instruction(), ScheduleInstruction);          // schedule instructions
+  progress += add_progress(handle_memory_return(), HandleMemoryReturn);          // finalize memory transactions
+  progress += add_progress(operate_lsq(), OperateLSQ);                   // execute memory transactions
 
-  progress += dispatch_instruction(); // dispatch
-  progress += decode_instruction();   // decode
-  progress += promote_to_decode();
+  progress += add_progress(dispatch_instruction(), DispatchInstruction); // dispatch
+  progress += add_progress(decode_instruction(), DecodeInstruction);   // decode
+  progress += add_progress(promote_to_decode(), PromoteToDecode);
 
-  progress += fetch_instruction(); // fetch
-  progress += check_dib();
+  progress += add_progress(fetch_instruction(), FetchInstruction); // fetch
+  progress += add_progress(check_dib(), CheckDIB);
   initialize_instruction();
+
+  store_all_buffer_lengths();
 
   // heartbeat
   if (show_heartbeat && (num_retired >= (last_heartbeat_instr + STAT_PRINTING_PERIOD))) {
@@ -150,11 +172,13 @@ void do_stack_pointer_folding(ooo_model_instr& arch_instr)
 bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
 {
   bool stop_fetch = false;
+  bool cheating_branch_taken = arch_instr.branch_taken;
+  champsim::address cheating_branch_target = arch_instr.branch_target;
 
   // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch
   sim_stats.total_branch_types.increment(arch_instr.branch);
-  auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip, arch_instr.branch);
-  arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch) || always_taken;
+  auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip, arch_instr.branch, cheating_branch_target);
+  arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch, cheating_branch_taken) || always_taken;
   if (!arch_instr.branch_prediction) {
     predicted_branch_target = champsim::address{};
   }
@@ -171,6 +195,11 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
         || (((arch_instr.branch == BRANCH_CONDITIONAL) || (arch_instr.branch == BRANCH_OTHER))
             && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
       sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
+      if (predicted_branch_target != arch_instr.branch_target
+        && !(((arch_instr.branch == BRANCH_CONDITIONAL) || (arch_instr.branch == BRANCH_OTHER))
+            && arch_instr.branch_taken != arch_instr.branch_prediction)) {
+        sim_stats.btb_misses++;
+      }
       sim_stats.branch_type_misses.increment(arch_instr.branch);
       if (!warmup) {
         fetch_resume_time = champsim::chrono::clock::time_point::max();
@@ -737,9 +766,9 @@ void O3_CPU::impl_last_branch_result(champsim::address ip, champsim::address tar
   branch_module_pimpl->impl_last_branch_result(ip, target, taken, branch_type);
 }
 
-bool O3_CPU::impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type) const
+bool O3_CPU::impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) const
 {
-  return branch_module_pimpl->impl_predict_branch(ip, predicted_target, always_taken, branch_type);
+  return branch_module_pimpl->impl_predict_branch(ip, predicted_target, always_taken, branch_type, cheating_branch_taken);
 }
 
 void O3_CPU::impl_initialize_btb() const { btb_module_pimpl->impl_initialize_btb(); }
@@ -749,9 +778,9 @@ void O3_CPU::impl_update_btb(champsim::address ip, champsim::address predicted_t
   btb_module_pimpl->impl_update_btb(ip, predicted_target, taken, branch_type);
 }
 
-std::pair<champsim::address, bool> O3_CPU::impl_btb_prediction(champsim::address ip, uint8_t branch_type) const
+std::pair<champsim::address, bool> O3_CPU::impl_btb_prediction(champsim::address ip, uint8_t branch_type, champsim::address cheating_branch_target) const
 {
-  return btb_module_pimpl->impl_btb_prediction(ip, branch_type);
+  return btb_module_pimpl->impl_btb_prediction(ip, branch_type, cheating_branch_target);
 }
 
 // LCOV_EXCL_START Exclude the following function from LCOV
