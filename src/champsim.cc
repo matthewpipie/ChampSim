@@ -198,4 +198,97 @@ std::vector<phase_stats> main(environment& env, std::vector<phase_info>& phases,
 
   return results;
 }
+
+
+void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
+  uint64_t study_instr = 0;
+  using namespace std;
+  //unordered_map<champsim::block_number, vector<uint64_t>> line_uses;
+  unordered_map<uint64_t, vector<uint64_t>> line_uses;
+  vector<uint64_t> reuse_dists;
+  unordered_map<uint64_t, vector<uint64_t>> i_line_uses;
+  vector<uint64_t> i_reuse_dists;
+
+  for (auto &phase : phases) {
+    auto [phase_name, is_warmup, length, trace_index, trace_names] = phase;
+
+    for (int64_t sim_instr = 0; sim_instr < length; sim_instr++) {
+      if (trace.eof()) {
+        fmt::print("trace file done (shouldn't happen?)\n");
+        break;
+      }
+      ooo_model_instr instr = trace();
+      if (!is_warmup) {
+        // do studying
+        for (auto source : instr.source_memory) {
+            uint64_t source_block = source.to<uint64_t>() / 64 * 64;
+            auto &v = line_uses[source_block];
+            v.push_back(study_instr);
+            if (v.size() > 1) {
+                reuse_dists.push_back(v.back() - v[v.size() - 2]);
+            }
+        }
+        uint64_t i_source_block = instr.ip.to<uint64_t>() / 64 * 64;
+        auto &i_v = i_line_uses[i_source_block];
+        i_v.push_back(study_instr);
+        if (i_v.size() > 1) {
+            i_reuse_dists.push_back(i_v.back() - i_v[i_v.size() - 2]);
+        }
+
+        study_instr++;
+      }
+    }
+  }
+  fmt::print("Study results:\n");
+  auto go1 = [&]() {
+      uint64_t total_reuse_dists = 0;
+      uint64_t num_uses = 0;
+      for (auto &[cline, v] : line_uses) {
+        total_reuse_dists += v.back() - v.front();
+        num_uses += v.size();
+      }
+      fmt::print("Over {} clines, Reuse dists {}, num_uses {}\n", line_uses.size(), total_reuse_dists, num_uses);
+      size_t n = reuse_dists.size();
+      std::sort(reuse_dists.begin(), reuse_dists.end());
+      uint64_t Ps[] = {1, 25, 50, 75, 90, 95, 99};
+      for (auto p : Ps) {
+          fmt::print("p{} {}\n", p, reuse_dists[p*n/100]);
+      }
+  };
+
+  auto go2 = [&]() {
+      uint64_t i_total_reuse_dists = 0;
+      uint64_t i_num_uses = 0;
+      for (auto &[cline, v] : i_line_uses) {
+        i_total_reuse_dists += v.back() - v.front();
+        i_num_uses += v.size();
+      }
+      fmt::print("Over {} clines, Reuse dists {}, num_uses {}\n", i_line_uses.size(), i_total_reuse_dists, i_num_uses);
+      size_t n = i_reuse_dists.size();
+      std::sort(i_reuse_dists.begin(), i_reuse_dists.end());
+      uint64_t Ps[] = {1, 25, 50, 75, 90, 95, 99};
+      for (auto p : Ps) {
+          fmt::print("p{} {}\n", p, i_reuse_dists[p*n/100]);
+      }
+  };
+
+  auto go3 = [&]() {
+    for (auto &[cline, v] : line_uses) {
+      fmt::print("d {} {}", cline, v.size());
+    }
+  };
+
+  auto go4 = [&]() {
+    for (auto &[cline, v] : i_line_uses) {
+      fmt::print("i {} {}", cline, v.size());
+    }
+  };
+
+  go1();
+  go2();
+  go3();
+  go4();
+
+}
+
 } // namespace champsim

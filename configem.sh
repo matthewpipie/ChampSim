@@ -5,33 +5,26 @@ ns="1"
 for n in $ns; do
     echo "starting n=$n"
 
-
-#core.1.v1..json
-#core.4.v1..json
-#l1d.n.v1..json
-#l1d.n.v1.prefetcher--stride_v1.json
-#l1i.n.v1..json
-#l1i.n.v1.prefetcher--next_line.json
-#l2c.n.v1..json
-#l2c.n.v1.prefetcher--bop_v1.json
-#llc.1.v1..json
-#llc.4.v1..json
-#memory.1.v1..json
-#memory.4.v1..json
-#tlbs.n.v1..json
-
     #l1is="l1i.n.v1..json"
     l1is="l1i.n.v1.prefetcher--eip.json"
-    l1ds="l1d.n.v1..json" # l1d.n.v1.ways--24.json"
-    #l2cs="l2c.n.v1.ways--32.json l2c.n.v1..json"
-    l2cs="l2c.n.v1..json"
+    #l1is="l1i.n.v1.sets--4194304.json"
+    #l1ds="l1d.n.v1..json"
+    l1ds="l1d.n.v1.prefetcher--berti.json"
+    #l1ds="l1d.n.v1.sets--4194304.json"
+    #l2cs="l2c.n.v1..json"
+    l2cs="l2c.n.v1.prefetcher--pythia.json"
+    #l2cs="l2c.n.v1.sets--4194304.json"
 
-    cores="core.$n.v1..json core.$n.v1.branch_predictor--cheating.json core.$n.v1.btb--cheating_btb.json core.$n.v1.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
-    #llcs="llc.$n.v1.ways--32.json llc.$n.v1..json"
-    llcs="llc.$n.v1..json"
+    cores="core.$n.v1..json" #core.$n.v1.branch_predictor--cheating.json core.$n.v1.btb--cheating_btb.json core.$n.v1.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
+    #cores="core.$n.v1.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
+    #cores="core.$n.v1..json core.$n.v1.branch_predictor--cheating.json core.$n.v1.btb--cheating_btb.json core.$n.v1.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
+    #llcs="llc.$n.v1..json"
+    llcs="llc.$n.v1.prefetcher--next_line.json"
+    #llcs="llc.$n.v1.sets--4194304.json"
     memories="memory.$n.v2..json" # memory.$n.v2.bandwidth--4x.json"
-    #tlbs="tlbs.n.v1.stlb-ways--24.json tlbs.n.v1..json" # tlbs.n.v1.dtlb-ways--8.json"
+    #memories="memory.$n.v2.instant--true.json"
     tlbs="tlbs.n.v1..json" # tlbs.n.v1.dtlb-ways--8.json"
+    #tlbs="tlbs.n.v1.stlb-ways--24.json tlbs.n.v1..json" # tlbs.n.v1.dtlb-ways--8.json"
 
     configdir="configs"
 

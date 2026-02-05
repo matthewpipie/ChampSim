@@ -15,6 +15,7 @@ coreout = sys.argv[-1]
 def flatten(dictionary, parent_key='', separator='.'):
     items = []
     for key, value in dictionary.items():
+        if key.startswith("__"): continue
         new_key = parent_key + separator + key if parent_key else key
         if isinstance(value, dict):
             items.extend(flatten(value, new_key, separator=separator).items())

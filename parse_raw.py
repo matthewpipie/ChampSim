@@ -3,6 +3,7 @@ import re
 import os
 import sys
 import json
+from collections import defaultdict
 from pathlib import Path
 from file_read_backwards import FileReadBackwards
 
@@ -28,10 +29,27 @@ def parse_one_output_file(fi, metadata):
     caches_ret = {}
     total_missed_reads = {}
     total_hit_reads = {}
+    ipc_log = defaultdict(list)
+    warmup_endtime = {}
     cpu = None
     with open(fi, 'r') as f:
         for line in f:
             line = line.strip()
+
+            match = re.search(r"Warmup complete CPU (\d+) instructions: (\d+) cycles: (\d+) cumulative IPC:", line)
+            if match:
+                cpu = int(match.group(1))
+                instrs = int(match.group(2))
+                cycles = int(match.group(3))
+                warmup_endtime[cpu] = [instrs, cycles]
+
+            match = re.search(r"Heartbeat CPU (\d+) instructions: (\d+) cycles: (\d+) heartbeat IPC", line)
+            if match:
+                cpu = int(match.group(1))
+                instrs = int(match.group(2))
+                cycles = int(match.group(3))
+                ipc_log[cpu].append([instrs, cycles])
+
 
             if line.startswith("=== Simulation ==="):
                 active = 1
@@ -356,6 +374,8 @@ def parse_one_output_file(fi, metadata):
 
     for (coreid, core) in cores_ret.items():
         core["caches"] = {}
+        core["__ipc_log"] = ipc_log[coreid]
+        core["warmup_endtime"] = warmup_endtime[coreid]
         core["trace_info"] = trace_infos[coreid]
         for (cname, cdata) in caches_ret.items():
             if coreid in cdata["source"]:
