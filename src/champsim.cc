@@ -52,6 +52,10 @@ long do_cycle(environment& env, std::vector<tracereader>& traces, std::vector<st
 
   // Read from trace
   for (O3_CPU& cpu : env.cpu_view()) {
+    //cpu is halted, don't provide instructions
+    if(cpu.halt)
+      continue;
+
     auto& trace = traces.at(trace_index.at(cpu.cpu));
     for (auto pkt_count = cpu.IN_QUEUE_SIZE - static_cast<long>(std::size(cpu.input_queue)); !trace.eof() && pkt_count > 0; --pkt_count) {
       cpu.input_queue.push_back(trace());
@@ -69,6 +73,7 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
   // Initialize phase
   for (champsim::operable& op : operables) {
     op.warmup = is_warmup;
+    op.halt = false;
     op.begin_phase();
   }
 
@@ -102,6 +107,10 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
     if (livelock_timer >= livelock_period) {
       // for each cpu
       for (O3_CPU& cpu : env.cpu_view()) {
+        // cpu is halted, don't check for livelock
+        if(cpu.halt)
+          continue;
+
         // for each threshold
         for (auto thres = std::begin(livelock_threshold); thres != std::end(livelock_threshold); thres++) {
           double livelock_ipc = std::ceil(cpu.sim_instr() - livelock_instr[cpu.cpu]) / std::ceil(livelock_period);
@@ -136,6 +145,12 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
     for (O3_CPU& cpu : env.cpu_view()) {
       // Phase complete
       next_phase_complete[cpu.cpu] = next_phase_complete[cpu.cpu] || (cpu.sim_instr() >= length);
+
+      //halt cpu if warmup
+      if(next_phase_complete[cpu.cpu] && is_warmup && !cpu.halt) {
+        cpu.halt = true;
+        fmt::print("{} halting CPU {} at instruction {} cycle {} for remainder of phase\n", phase_name, cpu.cpu, cpu.sim_instr(), cpu.sim_cycle());
+      }
     }
 
     for (O3_CPU& cpu : env.cpu_view()) {
