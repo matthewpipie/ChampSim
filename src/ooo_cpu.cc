@@ -27,6 +27,7 @@
 #include "cache.h"
 #include "champsim.h"
 #include "deadlock.h"
+#include "event_listeners.h"
 #include "instruction.h"
 #include "util/span.h"
 
@@ -72,6 +73,7 @@ long O3_CPU::operate()
   progress += add_progress(check_dib(), CheckDIB);
   initialize_instruction();
 
+<<<<<<< HEAD
   store_all_buffer_lengths();
 
   // heartbeat
@@ -751,6 +753,9 @@ long O3_CPU::retire_rob()
       reg_allocator.retire_dest_register(dreg);
     }
   }
+
+  uint64_t cycles = current_time.time_since_epoch() / clock_period;
+  handle_event<Event::RETIRE>(cpu, retire_begin, retire_end, cycles);
 
   auto retire_count = std::distance(retire_begin, retire_end);
   num_retired += retire_count;
