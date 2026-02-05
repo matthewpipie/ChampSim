@@ -73,7 +73,6 @@ long O3_CPU::operate()
   progress += add_progress(check_dib(), CheckDIB);
   initialize_instruction();
 
-<<<<<<< HEAD
   store_all_buffer_lengths();
 
   // heartbeat

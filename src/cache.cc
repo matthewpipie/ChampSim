@@ -215,10 +215,6 @@ bool CACHE::handle_fill(const fill_type& fill)
     evicting_address = module_address(*way);
   }
 
-  auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill), get_set_index(fill.address), way_idx, (fill.type == access_type::PREFETCH),
-                                                  evicting_address, fill.data_promise->pf_metadata);
-  impl_replacement_cache_fill(fill.cpu, get_set_index(fill.address), way_idx, module_address(fill), fill.ip, evicting_address, fill.type);
-
   if (way != set_end) {
     if (way->valid && way->prefetch) {
       ++sim_stats.pf_useless;
@@ -227,7 +223,13 @@ bool CACHE::handle_fill(const fill_type& fill)
     if (fill.type == access_type::PREFETCH) {
       ++sim_stats.pf_fill;
     }
+  }
 
+  auto metadata_thru = impl_prefetcher_cache_fill(module_address(fill), get_set_index(fill.address), way_idx, (fill.type == access_type::PREFETCH),
+                                                  evicting_address, fill.data_promise->pf_metadata);
+  impl_replacement_cache_fill(fill.cpu, get_set_index(fill.address), way_idx, module_address(fill), fill.ip, evicting_address, fill.type);
+
+  if (way != set_end) {
     *way = fill_block(fill, metadata_thru);
   }
 
