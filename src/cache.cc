@@ -169,7 +169,8 @@ champsim::address CACHE::module_address(const T& element) const
 template <typename T>
 bool CACHE::module_is_instr(const T& element) const
 {
-  return element.is_instr;
+  //return element.is_instr;
+  return false;
 }
 
 bool CACHE::handle_fill(const fill_type& fill)

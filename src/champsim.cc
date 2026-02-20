@@ -294,13 +294,13 @@ void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
 
   auto go3 = [&]() {
     for (auto &[cline, v] : line_uses) {
-      fmt::print("d {} {}", cline, v.size());
+      fmt::print("d {} {}\n", cline, v.size());
     }
   };
 
   auto go4 = [&]() {
     for (auto &[cline, v] : i_line_uses) {
-      fmt::print("i {} {}", cline, v.size());
+      fmt::print("i {} {}\n", cline, v.size());
     }
   };
 

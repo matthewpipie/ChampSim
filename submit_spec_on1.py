@@ -37,6 +37,7 @@ for workload in workloads:
     trace_files_all = sorted(list((Path(BASE_DIR) / workload).glob("*.xz")), key = lambda x:
             int(x.name.split("-")[1].split("B")[0]))
     trace_files = []
+    if len(trace_files_all) == 0: continue
     for i in range(N_CORES_PER_PROCESS):
         trace_files.append(trace_files_all[-1])
     for i, trace_file_batch in enumerate(list(grouper(trace_files, N_CORES_PER_PROCESS, incomplete="strict"))):

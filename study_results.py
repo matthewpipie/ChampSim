@@ -3,8 +3,10 @@ import re
 from collections import defaultdict
 import json
 
-srcdir = "/mnt/storage/traces/gtrace_v2_study_results//champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1./"
-outdir = "/mnt/storage/traces/gtrace_v2_study_results//champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1./"
+#srcdir = "/mnt/storage/traces/gtrace_v2_study_results//champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1./"
+#outdir = "/mnt/storage/traces/gtrace_v2_study_results//champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1./"
+srcdir = "/mnt/storage/traces/spectrace_study/champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1./"
+outdir = srcdir
 
 freqs_d = defaultdict(lambda: defaultdict(int))
 freqs_i = defaultdict(lambda: defaultdict(int))
