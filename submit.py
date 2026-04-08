@@ -5,15 +5,17 @@ from grouper import grouper
 from multiprocessing import Pool
 import subprocess
 import json
+from datetime import datetime, timezone
 from suites import SUITE_MAP
 
-if len(sys.argv) != 4:
-    print(f"Usage: {sys.argv[0]} <champsim_executable_path> <suite> <study_mode>")
+if len(sys.argv) != 4 and len(sys.argv) != 5:
+    print(f"Usage: {sys.argv[0]} <champsim_executable_path> <suite> <study_mode> [workload filter]")
     sys.exit(1)
 
 executable = Path(sys.argv[1])
 suite_name = sys.argv[2]
 study_mode = bool(int(sys.argv[3]))
+filt = sys.argv[4] if len(sys.argv) > 4 else None
 
 executable_name = executable.name
 
@@ -44,6 +46,12 @@ for suite in suites:
     N_CORES_PER_PROCESS = 1
 
     for workload in workloads:
+        if filt:
+            if filt not in workload:
+                print(f"Skipping {workload}")
+                continue
+            else:
+                print(f"Running {workload}")
         # get trace files
         trace_files = list(suite.get_traces_and_weights_in_workload(workload))
         #print(f"\tWorkload {workload}: {len(trace_files)} traces found")
@@ -65,10 +73,12 @@ for suite in suites:
 
             name_p = f"{workload},{i:03},{N_CORES_PER_PROCESS},{i*N_CORES_PER_PROCESS:03},{warmup},{simtime}"
             outname = f"{name_p}.raw"
-            jobname = f"{suite_name}---{study_mode}---{executable_name}---{name_p}.job"
+            #jobname = f"{suite_name}---{study_mode}---{executable_name}---{name_p}.job"[:255]
+            s = 's' if study_mode else 'z'
+            jobname = f"{s}---{executable_name}---{suite_name}---{name_p}.job"[:255]
             outfile = Path(OUT_DIR) / outname
 
-            commands.append({"command": command, "outfile": str(outfile.absolute()), "jobname": jobname})
+            commands.append({"command": command, "outfile": str(outfile.absolute()), "jobname": jobname, "subtime": datetime.now(timezone.utc).isoformat()})
 
     print("\tNumber of tasks: ", len(commands))
     for cmd in commands:

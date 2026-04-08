@@ -1,8 +1,15 @@
 from pathlib import Path
+
+# Bytes per trace record in inc/trace_instruction.h (verified via sizeof with g++):
+#   input_instr         -> 64 (default ChampSim trace format)
+#   cloudsuite_instr    -> 96 (--cloudsuite)
+
+
 class SpecSuite:
     BASE_DIR = Path("/mnt/storage/traces/spectrace/")
     WARMUP = 50_000_000
     SIMTIME = 250_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def __init__(self):
         pass
     def get_workloads(self):
@@ -42,6 +49,7 @@ class GoogleSuite:
     BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_champsim_1.3Binstr/")
     WARMUP = 50_000_000
     SIMTIME = 1_000_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def __init__(self):
         pass
     def get_workloads(self):
@@ -62,6 +70,7 @@ class QualcommSuite:
     BASE_DIR = Path("/mnt/storage/traces/qualcomm/ipc1_public/")
     WARMUP = 50_000_000
     SIMTIME = 50_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def get_workloads(self):
         # Assuming "client_xyz" refers to different cores of the same workload
         return sorted(set(map(lambda x: x.name.split("_")[0], self.BASE_DIR.glob("*.champsimtrace.xz"))))
@@ -77,6 +86,7 @@ class Parsec21Suite:
     BASE_DIR = Path("/mnt/storage/traces/parsec2.1/PARSEC-2.1/")
     WARMUP = 50_000_000
     SIMTIME = 200_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def get_workloads(self):
         return sorted(set(map(lambda x: x.name.split(".")[2], self.BASE_DIR.glob("*.champsimtrace.xz"))))
     def get_traces_and_weights_in_workload(self, workload):
@@ -91,6 +101,7 @@ class GAPSuite:
     BASE_DIR = Path("/mnt/storage/traces/GAP/allGAP/")
     WARMUP = 50_000_000
     SIMTIME = 250_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def get_workloads(self):
         return sorted(set(map(lambda x: x.name.split("-")[0], self.BASE_DIR.glob("*.trace.gz"))))
     def get_traces_and_weights_in_workload(self, workload):
@@ -105,6 +116,7 @@ class CloudSuite:
     BASE_DIR = Path("/mnt/storage/traces/cloudsuite/")
     WARMUP = 50_000_000
     SIMTIME = 250_000_000
+    TRACE_RECORD_BYTES = 96  # sizeof(cloudsuite_instr)
     def get_workloads(self):
         return sorted(set(map(lambda x: x.name.split("_")[0], self.BASE_DIR.glob("*.trace.xz"))))
     def get_traces_and_weights_in_workload(self, workload):
@@ -122,9 +134,10 @@ class CloudSuite:
 
 
 class AIMLSuite:
-    BASE_DIR = Path("/mnt/storage/traces/dpc4/DPC4-Traces/AI_ML/")
+    BASE_DIR = Path("/mnt/storage/traces/dpc4/DPC4-Traces-Full/ai-ml/")
     WARMUP = 50_000_000
     SIMTIME = 250_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def get_workloads(self):
         return sorted(set(map(lambda x: x.name.split(".")[0].split("_")[0], self.BASE_DIR.glob("*.champsimtrace.gz"))))
     def get_traces_and_weights_in_workload(self, workload):
@@ -140,9 +153,10 @@ class AIMLSuite:
         return "aiml"
 
 class GMSSuite:
-    BASE_DIR = Path("/mnt/storage/traces/dpc4/DPC4-Traces/Graph/GMS/")
+    BASE_DIR = Path("/mnt/storage/traces/dpc4/DPC4-Traces-Full/Graph/GMS/")
     WARMUP = 50_000_000
     SIMTIME = 200_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def get_workloads(self):
         return sorted(set(map(lambda x: x.name.split(".")[1], self.BASE_DIR.glob("*.champsimtrace.gz"))))
     def get_traces_and_weights_in_workload(self, workload):
@@ -154,9 +168,10 @@ class GMSSuite:
 
 
 class LigraSuite:
-    BASE_DIR = Path("/mnt/storage/traces/dpc4/DPC4-Traces/Graph/Ligra/")
+    BASE_DIR = Path("/mnt/storage/traces/dpc4/DPC4-Traces-Full/Graph/Ligra/")
     WARMUP = 50_000_000
     SIMTIME = 200_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def get_workloads(self):
         return sorted(set(map(lambda x: x.name.split(".")[0].split("_")[1], self.BASE_DIR.glob("*.champsimtrace.xz"))))
     def get_traces_and_weights_in_workload(self, workload):
@@ -171,17 +186,26 @@ SUITES = [SpecSuite(), GoogleSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite
 SUITE_MAP = {x.name(): x for x in SUITES}
 
 if __name__ == "__main__":
+    wln = 0
+    trn = 0
     for k, v in SUITE_MAP.items():
-        print(f"Suite {k}")
         wls = v.get_workloads()
+        print(f"Suite {k} ({len(wls)} workloads)")
+        trnl = 0
         for wl in wls:
+            wln = wln + 1
             traces = v.get_traces_and_weights_in_workload(wl)
             print(f"\tWorkload {wl} ({len(traces)} traces)")
             for trace in traces:
+                trn = trn + 1
+                trnl = trnl + 1
                 file = trace[0]
                 weight = trace[1]
                 warmup = trace[2]
                 simtime = trace[3]
                 flags = trace[4]
-                print(f"\t\t[{weight}] Trace {file}")
-
+                print(f"\t\t[{weight}] Trace {file} (warmup {warmup} simtime {simtime})")
+        print(f"Suite {k} end, ({len(wls)} workloads) with ({trnl} traces)")
+    print(f"Total suites: {len(SUITE_MAP.items())}")
+    print(f"Total workloads: {wln}")
+    print(f"Total traces: {trn}")

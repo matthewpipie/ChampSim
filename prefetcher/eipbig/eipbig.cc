@@ -1,7 +1,7 @@
-#include "eip.h"
+#include "eipbig.h"
 
 /*
-uint32_t eip::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
+uint32_t eipbig::prefetcher_cache_operate(champsim::address addr, champsim::address ip, uint8_t cache_hit, bool useful_prefetch, access_type type,
                                              uint32_t metadata_in)
 {
   champsim::block_number pf_addr{addr};
@@ -9,7 +9,7 @@ uint32_t eip::prefetcher_cache_operate(champsim::address addr, champsim::address
   return metadata_in;
 }
 
-uint32_t eip::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
+uint32_t eipbig::prefetcher_cache_fill(champsim::address addr, long set, long way, uint8_t prefetch, champsim::address evicted_addr, uint32_t metadata_in)
 {
   return metadata_in;
 }
@@ -36,7 +36,7 @@ static uint64_t current_core_cycle[NUM_CPUS];
 #define L1I_PQ_SIZE (32)
 #define L1I_MSHR_SIZE (8+16)
 #define L1I_WAY (8)
-#define L1I_SET (64)
+#define L1I_SET (256)
 
 // To access cpu in my functions
 static uint32_t l1i_cpu_id;
@@ -182,7 +182,7 @@ static uint64_t l1i_get_bere_hist_table(uint64_t line_addr, uint64_t latency, ui
 
 // TIMING TABLES
 
-#define L1I_SET_BITS 6
+#define L1I_SET_BITS 8
 #define L1I_TIMING_MSHR_SIZE (L1I_PQ_SIZE+L1I_MSHR_SIZE+2)
 #define L1I_TIMING_MSHR_TAG_BITS 42
 #define L1I_TIMING_MSHR_TAG_MASK (((uint64_t)1 << L1I_HIST_TAG_BITS) - 1)
@@ -654,7 +654,7 @@ static uint64_t l1i_get_xpq(uint64_t &entangled_addr) {
 
 // INTERFACE
 
-void eip::prefetcher_initialize() 
+void eipbig::prefetcher_initialize() 
 {
   cout << "CPU " << cpu << " EPI prefetcher" << endl;
 
@@ -669,11 +669,11 @@ void eip::prefetcher_initialize()
   l1i_init_xpq();
 }
 
-void eip::prefetcher_branch_operate(uint64_t ip, uint8_t branch_type, uint64_t branch_target)
+void eipbig::prefetcher_branch_operate(uint64_t ip, uint8_t branch_type, uint64_t branch_target)
 {
 }
 
-uint32_t eip::prefetcher_cache_operate(champsim::address __addr, champsim::address __ip, uint8_t cache_hit, bool prefetch_hit, access_type type, uint32_t metadata_in)
+uint32_t eipbig::prefetcher_cache_operate(champsim::address __addr, champsim::address __ip, uint8_t cache_hit, bool prefetch_hit, access_type type, uint32_t metadata_in)
 {
   uint64_t v_addr = __addr.to<uint64_t>();
   //uint64_t ip = __ip.to<uint64_t>();
@@ -760,7 +760,7 @@ uint32_t eip::prefetcher_cache_operate(champsim::address __addr, champsim::addre
   return metadata_in;
 }
 
-void eip::prefetcher_cycle_operate()
+void eipbig::prefetcher_cycle_operate()
 {
   // Do prefetches
   while (can_prefetch_line() && !l1i_empty_xpq()) {
@@ -775,8 +775,8 @@ void eip::prefetcher_cycle_operate()
   current_core_cycle[0]++;
 }
 
-//void eip::prefetcher_cache_fill(uint64_t v_addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_v_addr)
-uint32_t eip::prefetcher_cache_fill(uint64_t v_addr, long set, long way, uint8_t prefetch, uint64_t evicted_v_addr, uint32_t metadata_in)
+//void eipbig::prefetcher_cache_fill(uint64_t v_addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_v_addr)
+uint32_t eipbig::prefetcher_cache_fill(uint64_t v_addr, long set, long way, uint8_t prefetch, uint64_t evicted_v_addr, uint32_t metadata_in)
 {
   l1i_cpu_id = cpu;
   uint64_t line_addr = (v_addr >> LOG2_BLOCK_SIZE);
@@ -831,7 +831,7 @@ uint32_t eip::prefetcher_cache_fill(uint64_t v_addr, long set, long way, uint8_t
   return metadata_in;
 }
 
-void eip::prefetcher_final_stats()
+void eipbig::prefetcher_final_stats()
 {
   cout << "CPU " << cpu << " L1I EPI prefetcher final stats" << endl;
 }

@@ -431,6 +431,8 @@ long CACHE::operate()
 {
   long progress{0};
 
+  sim_stats.mshr_occupancy_distribution[MSHR.size()]++;
+
   auto is_ready = [time = current_time](const auto& entry) {
     return entry.event_cycle <= time;
   };
@@ -889,6 +891,8 @@ void CACHE::end_phase(unsigned finished_cpu)
   roi_stats.pf_useful = sim_stats.pf_useful;
   roi_stats.pf_useless = sim_stats.pf_useless;
   roi_stats.pf_fill = sim_stats.pf_fill;
+
+  roi_stats.mshr_occupancy_distribution = sim_stats.mshr_occupancy_distribution;
 
   for (auto* ul : upper_levels) {
     ul->roi_stats.RQ_ACCESS = ul->sim_stats.RQ_ACCESS;

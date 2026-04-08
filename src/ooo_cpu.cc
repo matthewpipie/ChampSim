@@ -179,7 +179,8 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
   // handle branch prediction for all instructions as at this point we do not know if the instruction is a branch
   sim_stats.total_branch_types.increment(arch_instr.branch);
   auto [predicted_branch_target, always_taken] = impl_btb_prediction(arch_instr.ip, arch_instr.branch, cheating_branch_target);
-  arch_instr.branch_prediction = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch, cheating_branch_taken) || always_taken;
+  bool bp_result = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch, cheating_branch_taken);
+  arch_instr.branch_prediction = bp_result || always_taken;
   if (!arch_instr.branch_prediction) {
     predicted_branch_target = champsim::address{};
   }
@@ -196,12 +197,24 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
         || (((arch_instr.branch == BRANCH_CONDITIONAL) || (arch_instr.branch == BRANCH_OTHER))
             && arch_instr.branch_taken != arch_instr.branch_prediction)) { // conditional branches are re-evaluated at decode when the target is computed
       sim_stats.total_rob_occupancy_at_branch_mispredict += std::size(ROB);
-      if (predicted_branch_target != arch_instr.branch_target
-        && !(((arch_instr.branch == BRANCH_CONDITIONAL) || (arch_instr.branch == BRANCH_OTHER))
-            && arch_instr.branch_taken != arch_instr.branch_prediction)) {
-        sim_stats.btb_misses++;
-      }
       sim_stats.branch_type_misses.increment(arch_instr.branch);
+      bool bp_relevant = ((arch_instr.branch == BRANCH_CONDITIONAL) || (arch_instr.branch == BRANCH_OTHER));
+      bool bp_correct = bp_result == arch_instr.branch_taken || !bp_relevant;
+      //bool btb_relevant = true;
+      bool btb_correct = predicted_branch_target == arch_instr.branch_target && always_taken == !bp_relevant; // possible to "get lucky": btb predicts uncond but is cond and not taken. that counts as btb win still
+      if (!btb_correct) {
+        if (!bp_correct) {
+          sim_stats.both_misses.increment(arch_instr.branch);
+        } else {
+          sim_stats.btb_misses.increment(arch_instr.branch);
+        }
+      } else {
+        if (!bp_correct) {
+          sim_stats.bp_misses.increment(arch_instr.branch);
+        } else {
+          assert(false); // either the BP or BTB must be wrong to be here
+        }
+      }
       if (!warmup) {
         fetch_resume_time = champsim::chrono::clock::time_point::max();
         stop_fetch = true;

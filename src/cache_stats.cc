@@ -13,5 +13,11 @@ cache_stats operator-(cache_stats lhs, cache_stats rhs)
   result.misses = lhs.misses - rhs.misses;
 
   result.total_miss_latency_cycles = lhs.total_miss_latency_cycles - rhs.total_miss_latency_cycles;
+
+  for (const auto& [key, val] : lhs.mshr_occupancy_distribution) {
+    auto it = rhs.mshr_occupancy_distribution.find(key);
+    result.mshr_occupancy_distribution[key] = val - (it != rhs.mshr_occupancy_distribution.end() ? it->second : 0);
+  }
+
   return result;
 }

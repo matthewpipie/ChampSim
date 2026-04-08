@@ -46,7 +46,7 @@ using PHYSICAL_REGISTER_ID = int16_t; // signed to use -1 to indicate no physica
 
 using namespace std::literals::string_view_literals;
 inline constexpr std::array branch_type_names{"BRANCH_DIRECT_JUMP"sv, "BRANCH_INDIRECT"sv,      "BRANCH_CONDITIONAL"sv,
-                                              "BRANCH_DIRECT_CALL"sv, "BRANCH_INDIRECT_CALL"sv, "BRANCH_RETURN"sv};
+                                              "BRANCH_DIRECT_CALL"sv, "BRANCH_INDIRECT_CALL"sv, "BRANCH_RETURN"sv, "BRANCH_OTHER"sv};
 
 namespace champsim
 {

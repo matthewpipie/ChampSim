@@ -16,6 +16,7 @@ for fi in config_json_files:
         sys.exit(1)
     filenames[component] = filename
     fi = json.loads(fi.read_text())
+    assert fi["name"].split(",")[0] == filename
     del fi["name"]
     full_output |= fi
 
@@ -32,3 +33,4 @@ Path(output_path).write_text(json_out)
 print("Building ", executable_name)
 subprocess.run(["./config.sh", output_path], check=True)
 subprocess.run(["make", "-j"], check=True)
+print("Finished building:", executable_name)

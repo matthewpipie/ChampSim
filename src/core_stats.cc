@@ -10,6 +10,9 @@ cpu_stats operator-(cpu_stats lhs, cpu_stats rhs)
 
   lhs.total_branch_types -= rhs.total_branch_types;
   lhs.branch_type_misses -= rhs.branch_type_misses;
+  lhs.btb_misses -= rhs.btb_misses;
+  lhs.bp_misses -= rhs.bp_misses;
+  lhs.both_misses -= rhs.both_misses;
 
   return lhs;
 }

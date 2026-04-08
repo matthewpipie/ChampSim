@@ -65,13 +65,15 @@ struct cpu_stats {
   long long end_instrs = 0;
   long long end_cycles = 0;
   uint64_t total_rob_occupancy_at_branch_mispredict = 0;
-  uint64_t btb_misses = 0;
 
   std::unordered_map<cpu_portion, std::map<uint64_t, uint64_t>> cpu_portion_distributions = {};
   std::unordered_map<cpu_buffer, std::map<size_t, uint64_t>> cpu_buffer_distributions = {};
 
   champsim::stats::event_counter<branch_type> total_branch_types = {};
-  champsim::stats::event_counter<branch_type> branch_type_misses = {};
+  champsim::stats::event_counter<branch_type> branch_type_misses = {}; // btb or bp missed
+  champsim::stats::event_counter<branch_type> bp_misses = {};
+  champsim::stats::event_counter<branch_type> btb_misses = {};
+  champsim::stats::event_counter<branch_type> both_misses = {};
 
   [[nodiscard]] auto instrs() const { return end_instrs - begin_instrs; }
   [[nodiscard]] auto cycles() const { return end_cycles - begin_cycles; }

@@ -72,7 +72,8 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
 
   // Initialize phase
   for (champsim::operable& op : operables) {
-    op.warmup = is_warmup;
+    //op.warmup = is_warmup;
+    op.warmup = false;
     op.halt = false;
     op.begin_phase();
   }
@@ -211,7 +212,8 @@ std::vector<phase_stats> main(environment& env, std::vector<phase_info>& phases,
     // handle_begin_phase(0, phase.is_warmup);
 
     auto stats = do_phase(phase, env, traces, global_clock);
-    if (!phase.is_warmup) {
+    //if (!phase.is_warmup) {
+    if (!phase.is_warmup && phase.name.compare("Warmup") != 0) {
       results.push_back(stats);
     }
   }
@@ -219,13 +221,67 @@ std::vector<phase_stats> main(environment& env, std::vector<phase_info>& phases,
   return results;
 }
 
+uint64_t cumsum(std::vector<uint64_t> &v, size_t p) {
+    uint64_t cumsum = 0;
+    for (size_t ii = 0; ii < p; ii++) {
+        cumsum += v[ii];
+    }
+    return cumsum;
+}
+void make_print_hist(std::string prologue, std::vector<uint64_t> &v) {
+    // create histogram from raw data
+    uint64_t sum = 0;
+    uint64_t uniq = 0;
+    std::unordered_map<uint64_t, uint64_t> hist;
+    std::unordered_map<uint64_t, uint64_t> bin_hist;
+    std::sort(v.begin(), v.end());
+    for (auto &i : v) {
+        if (hist[i] == 0) uniq++;
+        hist[i]++;
+        sum += i;
+        bin_hist[64 - __builtin_clzll(i)]++;
+    }
+    for (size_t i = 0; i < 100; i++) {
+        size_t p = i*v.size() / 100;
+        fmt::print("{} p{} {} {}\n", prologue, i, v[p], cumsum(v, p));
+    }
+    for (size_t i = 991; i < 1000; i++) {
+        size_t p = i*v.size() / 1000;
+        fmt::print("{} p99.{} {} {}\n", prologue, i-990, v[p], cumsum(v, p));
+    }
+    for (size_t i = 9991; i < 10000; i++) {
+        size_t p = i*v.size() / 10000;
+        fmt::print("{} p99.9{} {} {}\n", prologue, i-9990, v[p], cumsum(v, p));
+    }
+    for (size_t i = 99991; i < 100000; i++) {
+        size_t p = i*v.size() / 100000;
+        fmt::print("{} p99.99{} {} {}\n", prologue, i-99990, v[p], cumsum(v, p));
+    }
+    for (size_t i = 999991; i < 1000000; i++) {
+        size_t p = i*v.size() / 1000000;
+        fmt::print("{} p99.999{} {} {}\n", prologue, i-999990, v[p], cumsum(v, p));
+    }
+    fmt::print("{} p100 {} {}\n", prologue, v.back(), sum);
+    fmt::print("{} cnt {}\n", prologue, v.size());
+    fmt::print("{} sum {}\n", prologue, sum);
+    fmt::print("{} uniq {}\n", prologue, uniq);
+    fmt::print("{} v0 {}\n", prologue, hist[0]);
+    fmt::print("{} v1 {}\n", prologue, hist[1]);
+    fmt::print("{} v2 {}\n", prologue, hist[2]);
+    for (auto &[k, v] : bin_hist) {
+        fmt::print("{} bin{} {}\n", prologue, k, v);
+    }
+}
 
 void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
   uint64_t study_instr = 0;
+  uint64_t data_access = 0;
+  uint64_t instr_access = 0;
   using namespace std;
-  //unordered_map<champsim::block_number, vector<uint64_t>> line_uses;
   unordered_map<uint64_t, vector<uint64_t>> line_uses;
+  unordered_map<uint64_t, vector<uint64_t>> line_uses_access;
   vector<uint64_t> reuse_dists;
+  vector<uint64_t> reuse_dists_access;
   unordered_map<uint64_t, vector<uint64_t>> i_line_uses;
   vector<uint64_t> i_reuse_dists;
 
@@ -247,6 +303,24 @@ void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
             if (v.size() > 1) {
                 reuse_dists.push_back(v.back() - v[v.size() - 2]);
             }
+            auto &va = line_uses_access[source_block];
+            va.push_back(data_access++);
+            if (va.size() > 1) {
+                reuse_dists_access.push_back(va.back() - va[va.size() - 2]);
+            }
+        }
+        for (auto dest : instr.destination_memory) {
+            uint64_t dest_block = dest.to<uint64_t>() / 64 * 64;
+            auto &v = line_uses[dest_block];
+            v.push_back(study_instr);
+            if (v.size() > 1) {
+                reuse_dists.push_back(v.back() - v[v.size() - 2]);
+            }
+            auto &va = line_uses_access[dest_block];
+            va.push_back(data_access++);
+            if (va.size() > 1) {
+                reuse_dists_access.push_back(va.back() - va[va.size() - 2]);
+            }
         }
         uint64_t i_source_block = instr.ip.to<uint64_t>() / 64 * 64;
         auto &i_v = i_line_uses[i_source_block];
@@ -260,54 +334,17 @@ void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
     }
   }
   fmt::print("Study results:\n");
-  auto go1 = [&]() {
-      uint64_t total_reuse_dists = 0;
-      uint64_t num_uses = 0;
-      for (auto &[cline, v] : line_uses) {
-        total_reuse_dists += v.back() - v.front();
-        num_uses += v.size();
-      }
-      fmt::print("Over {} clines, Reuse dists {}, num_uses {}\n", line_uses.size(), total_reuse_dists, num_uses);
-      size_t n = reuse_dists.size();
-      std::sort(reuse_dists.begin(), reuse_dists.end());
-      uint64_t Ps[] = {1, 25, 50, 75, 90, 95, 99};
-      for (auto p : Ps) {
-          fmt::print("p{} {}\n", p, reuse_dists[p*n/100]);
-      }
-  };
+  vector<uint64_t> line_use_cnts;
+  for (auto &[k, v] : line_uses) line_use_cnts.push_back(v.size());
+  make_print_hist("data lines", line_use_cnts);
 
-  auto go2 = [&]() {
-      uint64_t i_total_reuse_dists = 0;
-      uint64_t i_num_uses = 0;
-      for (auto &[cline, v] : i_line_uses) {
-        i_total_reuse_dists += v.back() - v.front();
-        i_num_uses += v.size();
-      }
-      fmt::print("Over {} clines, Reuse dists {}, num_uses {}\n", i_line_uses.size(), i_total_reuse_dists, i_num_uses);
-      size_t n = i_reuse_dists.size();
-      std::sort(i_reuse_dists.begin(), i_reuse_dists.end());
-      uint64_t Ps[] = {1, 25, 50, 75, 90, 95, 99};
-      for (auto p : Ps) {
-          fmt::print("p{} {}\n", p, i_reuse_dists[p*n/100]);
-      }
-  };
+  vector<uint64_t> i_line_use_cnts;
+  for (auto &[k, v] : i_line_uses) i_line_use_cnts.push_back(v.size());
+  make_print_hist("instruction lines", i_line_use_cnts);
 
-  auto go3 = [&]() {
-    for (auto &[cline, v] : line_uses) {
-      fmt::print("d {} {}\n", cline, v.size());
-    }
-  };
-
-  auto go4 = [&]() {
-    for (auto &[cline, v] : i_line_uses) {
-      fmt::print("i {} {}\n", cline, v.size());
-    }
-  };
-
-  go1();
-  go2();
-  go3();
-  go4();
+  make_print_hist("data reuse", reuse_dists);
+  make_print_hist("data reuse_access", reuse_dists_access);
+  make_print_hist("instruction reuse", i_reuse_dists);
 
 }
 

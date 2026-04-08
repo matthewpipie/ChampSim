@@ -41,7 +41,7 @@ auto print_ratio(N num, D denom)
 std::vector<std::string> champsim::plain_printer::format(O3_CPU::stats_type stats)
 {
   constexpr std::array types{branch_type::BRANCH_DIRECT_JUMP, branch_type::BRANCH_INDIRECT,      branch_type::BRANCH_CONDITIONAL,
-                             branch_type::BRANCH_DIRECT_CALL, branch_type::BRANCH_INDIRECT_CALL, branch_type::BRANCH_RETURN};
+                             branch_type::BRANCH_DIRECT_CALL, branch_type::BRANCH_INDIRECT_CALL, branch_type::BRANCH_RETURN, branch_type::BRANCH_OTHER};
   auto total_branch = std::ceil(
       std::accumulate(std::begin(types), std::end(types), 0LL, [tbt = stats.total_branch_types](auto acc, auto next) { return acc + tbt.value_or(next, 0); }));
   auto total_mispredictions = std::ceil(
@@ -55,12 +55,18 @@ std::vector<std::string> champsim::plain_printer::format(O3_CPU::stats_type stat
                               ::print_ratio(100 * (total_branch - total_mispredictions), total_branch),
                               ::print_ratio(std::kilo::num * total_mispredictions, stats.instrs()),
                               ::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions),
-                              stats.btb_misses, total_branch, total_mispredictions));
+                              stats.btb_misses.total(), total_branch, total_mispredictions));
 
-  lines.emplace_back("Branch type MPKI");
+  lines.emplace_back("Branch type MPKI, Branches, Misses, BP Misses, BTB Misses, Both Misses");
   for (auto idx : types) {
-    lines.push_back(fmt::format("{}: {}", branch_type_names.at(champsim::to_underlying(idx)),
-                                ::print_ratio(std::kilo::num * stats.branch_type_misses.value_or(idx, 0), stats.instrs())));
+    lines.push_back(fmt::format("{}: {} {} {} {} {} {}", branch_type_names.at(champsim::to_underlying(idx)),
+                                ::print_ratio(std::kilo::num * stats.branch_type_misses.value_or(idx, 0), stats.instrs()),
+                                stats.total_branch_types.value_or(idx, 0),
+                                stats.branch_type_misses.value_or(idx, 0),
+                                stats.bp_misses.value_or(idx, 0),
+                                stats.btb_misses.value_or(idx, 0),
+                                stats.both_misses.value_or(idx, 0)
+    ));
   }
 
   constexpr std::array portion_types{
@@ -156,6 +162,10 @@ std::vector<std::string> champsim::plain_printer::format(CACHE::stats_type stats
     uint64_t total_downstream_demands = total_fill - stats.fill.value_or(std::pair{access_type::PREFETCH, cpu}, fill_value_type{});
     lines.push_back(
         fmt::format("cpu{}->{} AVERAGE MISS LATENCY: {} cycles", cpu, stats.name, ::print_ratio(stats.total_miss_latency_cycles, total_downstream_demands)));
+  }
+
+  for (const auto& [occupancy, cycles] : stats.mshr_occupancy_distribution) {
+    lines.push_back(fmt::format("{} MSHR_OCCUPANCY: {}: {}", stats.name, occupancy, cycles));
   }
 
   return lines;

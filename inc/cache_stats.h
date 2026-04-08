@@ -2,6 +2,7 @@
 #define CACHE_STATS_H
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -24,6 +25,8 @@ struct cache_stats {
   champsim::stats::event_counter<std::pair<access_type, std::remove_cv_t<decltype(NUM_CPUS)>>> fill = {};
 
   long total_miss_latency_cycles{};
+
+  std::map<std::size_t, uint64_t> mshr_occupancy_distribution{};
 };
 
 cache_stats operator-(cache_stats lhs, cache_stats rhs);

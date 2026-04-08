@@ -12,7 +12,7 @@ from suites import SUITE_MAP
 filter_caches = False
 
 OUT_DIR = Path("/mnt/storage/mgiordan/trace_parses")
-STUDY_DIR = Path("/mnt/storage/mgiordan/trace_analysis")
+STUDY_DIR = Path("/mnt/storage/mgiordan/trace_analysis/champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1.")
 
 def mean(l):
     return sum(l) / len(l)
@@ -21,9 +21,7 @@ def median(l):
     return sorted(l)[len(l)//2]
 
 def parse_study_output(fi):
-    ret = {"data": {}, "instructions": {}} 
-    isDataL = ["data", "instructions"]
-    isDataC = -1
+    ret = {"data": {"lines": {}, "reuse": {}, "reuse_access": {}}, "instruction": {"lines": {}, "reuse": {}}} 
     with open(fi, 'r') as f:
         for line in f:
             line = line.strip()
@@ -36,19 +34,14 @@ def parse_study_output(fi):
             if match:
                 ret["sim_instrs"] = int(match.group(1))
 
-            match = re.search(r"Over (\d+) clines, Reuse dists (\d+), num_uses (\d+)", line)
+            match = re.search(r"(data|instruction) (lines|reuse|reuse_access) (\w+) (\d+)$", line)
             if match:
-                isDataC += 1
-                isData = isDataL[isDataC]
-                ret[isData]["num_clines"] = int(match.group(1))
-                ret[isData]["reuse_dists"] = int(match.group(2))
-                ret[isData]["num_uses"] = int(match.group(3))
+                ret[match.group(1)][match.group(2)][match.group(3)] = int(match.group(4))
 
-            match = re.search(r"p(\d+) (\d+)", line)
+            match = re.search(r"(data|instruction) (lines|reuse|reuse_access) p(\d+) (\d+) (\d+)", line)
             if match:
-                ret[isData]["p" + match.group(1)] = int(match.group(2))
-                if match.group(1) == "99" and isData == "instructions":
-                    break
+                ret[match.group(1)][match.group(2)]["pp" + match.group(3)] = int(match.group(4))
+                ret[match.group(1)][match.group(2)]["pc" + match.group(3)] = int(match.group(5))
     return ret
 
 def parse_one_output_file(fi, metadata, suite_workload_weights):
@@ -90,9 +83,11 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 simulation_file_path = match.group(2)
                 simulation_file = Path(simulation_file_path)
                 weight = suite_workload_weights[metadata["workload"]][simulation_file]
+                print("\tSource: "+ str(simulation_file))
                 del suite_workload_weights[metadata["workload"]][simulation_file]
                 # first, look for study output of same section
-                study_output_file = STUDY_DIR / fi.parent.parent.name / fi.parent.name / fi.name
+                #study_output_file = STUDY_DIR / fi.parent.parent.name / fi.parent.name / fi.name
+                study_output_file = STUDY_DIR / fi.parent.name / fi.name
                 study_output = parse_study_output(study_output_file)
                 # then, look for champsim conversion script output
                 match = re.search(r".+(_(\d+)\.champsim\.gz)", line)
@@ -250,7 +245,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                         "branch_predictor": {},
                 }
                     
-            match = re.search(r"CPU (\d+) Branch Prediction Accuracy: ([\d.]+)% MPKI: ([\d.]+) Average ROB Occupancy at Mispredict: ([-\d.]+)", line)
+            match = re.search(r"CPU (\d+) Branch Prediction Accuracy: ([\d.]+)% MPKI: ([\d.]+) Average ROB Occupancy at Mispredict: ([-\d.]+) BTB Misses: (\d+) Branches: (\d+) Mispredicted: (\d+)", line)
             if match:
                 assert(int(match.group(1)) == cpu)
                 cores_ret[cpu]["branch_predictor"]["branch_prediction_accuracy"] = float(match.group(2)) / 100
@@ -259,6 +254,9 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                     cores_ret[cpu]["branch_predictor"]["average_ROB_occupancy_at_mispredict"] = float(match.group(4))
                 except ValueError:
                     cores_ret[cpu]["branch_predictor"]["average_ROB_occupancy_at_mispredict"] = float(0)
+                cores_ret[cpu]["branch_predictor"]["btb_misses"] = int(match.group(5))
+                cores_ret[cpu]["branch_predictor"]["branches"] = int(match.group(6))
+                cores_ret[cpu]["branch_predictor"]["branches_mispredicted"] = int(match.group(7))
             match = re.search(r"^([A-Z_]+): ([\d.]+)", line)
             if match:
                 bname = match.group(1)
@@ -348,6 +346,8 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 pref_useful = int(match.group(6))
                 pref_useless = int(match.group(7))
                 if "prefetches" in caches_ret[dest_cache]:
+                    #print(dest_cache)
+                    #print(caches_ret[dest_cache])
                     assert(caches_ret[dest_cache]["prefetches"]["issued"] == pref_iss)
                     continue
                 caches_ret[dest_cache]["prefetches"] = {
@@ -495,19 +495,21 @@ if __name__ == "__main__":
     input_files = sys.argv[1:]
 
     for suite_name, suite in SUITE_MAP.items():
+        print(f"Starting suite {suite_name}")
         res = []
         
-        suite_workload_weights = {}
         workloads = suite.get_workloads()
-        for workload in workloads:
-            traces = suite.get_traces_and_weights_in_workload(workload)
-            suite_workload_weights[workload] = {}
-            for trace in traces:
-                trace_file = trace[0]
-                weight = trace[1]
-                suite_workload_weights[workload][trace_file] = weight
-
         for fi in input_files:
+            suite_workload_weights = {}
+
+            for workload in workloads:
+                traces = suite.get_traces_and_weights_in_workload(workload)
+                suite_workload_weights[workload] = {}
+                for trace in traces:
+                    trace_file = trace[0]
+                    weight = trace[1]
+                    suite_workload_weights[workload][trace_file] = weight
+
             cs_dir = Path(fi)
             if not cs_dir.is_dir():
                 raise Exception("needs champsim dir")
@@ -516,13 +518,21 @@ if __name__ == "__main__":
             champsim_config = cs_dir.name
             cfg_dict = parse_champsim_config(champsim_config)
             #print(fi)
+            res_tmp = []
             for outfile in (cs_dir / suite_name).glob("*.raw"):
                 meta = parse_filename(Path(outfile).name)
                 meta |= {"champsim_config": cfg_dict, "suite": suite_name}
                 print(f"Parsing: {outfile}")
                 #print(f"Parsing: {outfile} with meta {meta}")
-                res += [parse_one_output_file(outfile, meta, suite_workload_weights)]
+                res_tmp += [parse_one_output_file(outfile, meta, suite_workload_weights)]
+            if all([len(v) == 0 for k, v in suite_workload_weights.items()]): # ensure all traces actually got ran
+            #if True:
+                # all traces got ran
+                res += res_tmp
+            else:
+                # not all traces got ran. skip this res
+                print(f"*** Missing a workload for {fi} in:")
+                print(suite_workload_weights)
         output = OUT_DIR / (suite_name + ".json")
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(round_floats(res), indent=2))
-        assert all([len(v) == 0 for k, v in suite_workload_weights.items()]) # ensure all traces actually got ran
