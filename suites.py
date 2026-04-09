@@ -29,7 +29,7 @@ class SpecSuite:
             except ValueError as v:
                 print(f"WARN: no weight found for {workload} trace {trace}")
                 weight = 0.1 # idk
-            if weight < 0.01:
+            if weight < 0.02:
                 print(f"INFO: skipping workload {workload} trace {trace} as weight is low ({weight})")
                 continue
             output += [[trace, weight, self.WARMUP, self.SIMTIME, []]]
@@ -48,7 +48,7 @@ class SpecSuite:
 class GoogleSuite:
     BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_champsim_1.3Binstr/")
     WARMUP = 50_000_000
-    SIMTIME = 1_000_000_000
+    SIMTIME = 500_000_000
     TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def __init__(self):
         pass

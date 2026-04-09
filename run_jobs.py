@@ -78,8 +78,9 @@ if __name__ == '__main__':
                     if TRIGGER:
                         TRIGGER -= 1
                     else:
-                        time.sleep(10)
-            time.sleep(5)
+                        #time.sleep(10)
+                        pass
+            time.sleep(2)
             if get_mem_util() > 0.97:
                 print("ERROR: OOM! Quitting...")
                 pool.terminate()

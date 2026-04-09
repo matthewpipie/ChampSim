@@ -200,8 +200,9 @@ bool O3_CPU::do_predict_branch(ooo_model_instr& arch_instr)
       sim_stats.branch_type_misses.increment(arch_instr.branch);
       bool bp_relevant = ((arch_instr.branch == BRANCH_CONDITIONAL) || (arch_instr.branch == BRANCH_OTHER));
       bool bp_correct = bp_result == arch_instr.branch_taken || !bp_relevant;
-      //bool btb_relevant = true;
-      bool btb_correct = predicted_branch_target == arch_instr.branch_target && always_taken == !bp_relevant; // possible to "get lucky": btb predicts uncond but is cond and not taken. that counts as btb win still
+      bool always_taken_correct = always_taken == !bp_relevant;
+      bool btb_relevant = arch_instr.branch_prediction || !always_taken_correct;
+      bool btb_correct = (predicted_branch_target == arch_instr.branch_target && always_taken_correct) || !btb_relevant; // possible to "get lucky": btb predicts uncond but is cond and not taken. that counts as btb win still
       if (!btb_correct) {
         if (!bp_correct) {
           sim_stats.both_misses.increment(arch_instr.branch);

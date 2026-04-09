@@ -12,7 +12,8 @@ from suites import SUITE_MAP
 filter_caches = False
 
 OUT_DIR = Path("/mnt/storage/mgiordan/trace_parses")
-STUDY_DIR = Path("/mnt/storage/mgiordan/trace_analysis/champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1.")
+#STUDY_DIR = Path("/mnt/storage/mgiordan/trace_analysis/champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1.")
+STUDY_DIR = Path("/mnt/storage/mgiordan/trace_analysis/champsim_core.1.v2.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v2.,_memory.1.v2.,_tlbs.n.v1.")
 
 def mean(l):
     return sum(l) / len(l)
@@ -82,9 +83,13 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 cpu = int(match.group(1))
                 simulation_file_path = match.group(2)
                 simulation_file = Path(simulation_file_path)
-                weight = suite_workload_weights[metadata["workload"]][simulation_file]
-                print("\tSource: "+ str(simulation_file))
-                del suite_workload_weights[metadata["workload"]][simulation_file]
+                if simulation_file not in suite_workload_weights[metadata["workload"]]:
+                    weight = 0
+                    print("WARN: Source no longer in suite: "+ str(simulation_file))
+                else:
+                    weight = suite_workload_weights[metadata["workload"]][simulation_file]
+                    print("\tSource: "+ str(simulation_file))
+                    del suite_workload_weights[metadata["workload"]][simulation_file]
                 # first, look for study output of same section
                 #study_output_file = STUDY_DIR / fi.parent.parent.name / fi.parent.name / fi.name
                 study_output_file = STUDY_DIR / fi.parent.name / fi.name
@@ -257,10 +262,16 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 cores_ret[cpu]["branch_predictor"]["btb_misses"] = int(match.group(5))
                 cores_ret[cpu]["branch_predictor"]["branches"] = int(match.group(6))
                 cores_ret[cpu]["branch_predictor"]["branches_mispredicted"] = int(match.group(7))
-            match = re.search(r"^([A-Z_]+): ([\d.]+)", line)
+            match = re.search(r"^([A-Z_]+): ([\d.]+) (\d+) (\d+) (\d+) (\d+) (\d+)", line)
             if match:
                 bname = match.group(1)
-                cores_ret[cpu]["branch_predictor"][f"mpki_{bname}"] = float(match.group(2))
+                cores_ret[cpu]["branch_predictor"][bname] = {}
+                cores_ret[cpu]["branch_predictor"][bname][f"mpki"] = float(match.group(2))
+                cores_ret[cpu]["branch_predictor"][bname][f"branches"] = int(match.group(3))
+                cores_ret[cpu]["branch_predictor"][bname][f"misses"] = int(match.group(4))
+                cores_ret[cpu]["branch_predictor"][bname][f"bp_only_misses"] = int(match.group(5))
+                cores_ret[cpu]["branch_predictor"][bname][f"btb_only_misses"] = int(match.group(6))
+                cores_ret[cpu]["branch_predictor"][bname][f"both_misses"] = int(match.group(7))
 
             match = re.search(r"^CPU \d+ Portion (\w+): (\d+): (\d+)$", line)
             if match:
@@ -295,6 +306,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                         "source": {},
                         "total_missed_reads": 0,
                         "total_hit_reads": 0,
+                        "mshr_distribution": {},
                     }
 
                 access = int(match.group(5))
@@ -336,6 +348,21 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 average_miss_latency = float(match.group(4))
                 caches_ret[dest_cache]["source"][cpu]["average_miss_latency"] = average_miss_latency
 
+            match = re.search(r"^(\w+) MSHR_OCCUPANCY: (\d+): (\d+)$", line)
+            if match:
+                cache = match.group(1)
+                if cache not in caches_ret:
+                    cache_type = cache.split("_")[-1]
+                    caches_ret[cache] = {
+                        "cache_name": cache,
+                        "cache_type": cache_type,
+                        "source": {},
+                        "total_missed_reads": 0,
+                        "total_hit_reads": 0,
+                        "mshr_distribution": {},
+                    }
+                caches_ret[cache]["mshr_distribution"][f"{int(match.group(2)):03d}"] = int(match.group(3))
+
             match = re.search(r"^(cpu(\d+)->(\w+)) PREFETCH REQUESTED:\s+(\d+) ISSUED:\s+(\d+) USEFUL:\s+(\d+) USELESS:\s+(\d+)", line)
             if match:
                 dest_cache = match.group(3)
@@ -359,6 +386,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 }
     # postprocess cache stuffs
     for (cname, cdata) in caches_ret.items():
+        if len(cdata["source"]) == 0: continue
         read_hitrate = 0.0
         try:
             read_hitrate = cdata["total_hit_reads"] / (cdata["total_hit_reads"] + cdata["total_missed_reads"])

@@ -21,6 +21,10 @@ executable_name = executable.name
 
 if suite_name == "all":
     suites = list(SUITE_MAP.values())
+    input("u sure you want all?")
+elif suite_name == "mini":
+#SUITES = [SpecSuite(), GoogleSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
+    suites = list(map(lambda x: SUITE_MAP[x], ["spec", "googleV2", "qualcomm", "parsec2.1", "gap", "cloudsuite"]))
 else:
     suites = [SUITE_MAP[suite_name]]
 
