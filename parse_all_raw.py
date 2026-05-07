@@ -14,6 +14,7 @@ filter_caches = False
 OUT_DIR = Path("/mnt/storage/mgiordan/trace_parses")
 #STUDY_DIR = Path("/mnt/storage/mgiordan/trace_analysis/champsim_core.1.v1.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v1.,_memory.1.v2.,_tlbs.n.v1.")
 STUDY_DIR = Path("/mnt/storage/mgiordan/trace_analysis/champsim_core.1.v2.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v2.,_memory.1.v2.,_tlbs.n.v1.")
+STUDY_DIR_STANDARD = Path("/mnt/storage/mgiordan/trace_analysis_standard/champsim_core.1.v2.,_l1i.n.v1.,_l1d.n.v1.,_l2c.n.v1.,_llc.1.v2.,_memory.1.v2.,_tlbs.n.v1.")
 
 def mean(l):
     return sum(l) / len(l)
@@ -22,7 +23,7 @@ def median(l):
     return sorted(l)[len(l)//2]
 
 def parse_study_output(fi):
-    ret = {"data": {"lines": {}, "reuse": {}, "reuse_access": {}}, "instruction": {"lines": {}, "reuse": {}}} 
+    ret = {"branch": {"freq": {}}, "taken_branch": {"freq": {}}, "data": {"lines": {}, "reuse": {}, "reuse_access": {}}, "instruction": {"lines": {}, "reuse": {}}} 
     with open(fi, 'r') as f:
         for line in f:
             line = line.strip()
@@ -35,11 +36,11 @@ def parse_study_output(fi):
             if match:
                 ret["sim_instrs"] = int(match.group(1))
 
-            match = re.search(r"(data|instruction) (lines|reuse|reuse_access) (\w+) (\d+)$", line)
+            match = re.search(r"(branch|taken_branch|data|instruction) (freq|lines|reuse|reuse_access) (\w+) (\d+)$", line)
             if match:
                 ret[match.group(1)][match.group(2)][match.group(3)] = int(match.group(4))
 
-            match = re.search(r"(data|instruction) (lines|reuse|reuse_access) p(\d+) (\d+) (\d+)", line)
+            match = re.search(r"(branch|taken_branch|data|instruction) (freq|lines|reuse|reuse_access) p(\d+) (\d+) (\d+)", line)
             if match:
                 ret[match.group(1)][match.group(2)]["pp" + match.group(3)] = int(match.group(4))
                 ret[match.group(1)][match.group(2)]["pc" + match.group(3)] = int(match.group(5))
@@ -92,8 +93,14 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                     del suite_workload_weights[metadata["workload"]][simulation_file]
                 # first, look for study output of same section
                 #study_output_file = STUDY_DIR / fi.parent.parent.name / fi.parent.name / fi.name
-                study_output_file = STUDY_DIR / fi.parent.name / fi.name
-                study_output = parse_study_output(study_output_file)
+                if metadata["champsim_config"]["is_base"]:
+                    study_output_file = STUDY_DIR / fi.parent.name / fi.name
+                    study_output_standard_file = STUDY_DIR_STANDARD / fi.parent.name / fi.name
+                    study_output = parse_study_output(study_output_file)
+                    study_output_standard = parse_study_output(study_output_standard_file)
+                else:
+                    study_output = {}
+                    study_output_standard = {}
                 # then, look for champsim conversion script output
                 match = re.search(r".+(_(\d+)\.champsim\.gz)", line)
                 if match:
@@ -113,7 +120,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                     with FileReadBackwards(str(logfile.absolute()), encoding="ascii") as logf:
                         for logline in logf:
                             if logline.startswith("Thread"):
-                                match = re.search(f"Thread {scheduled_coreid} processed (-?\d+) instructions", logline)
+                                match = re.search(f"Thread {scheduled_coreid} processed (-?\\d+) instructions", logline)
                                 if match:
                                     instructions_processed = match.group(1)
                                     break
@@ -128,7 +135,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                     #with open(logfile_ideal, "r") as logf:
                         for logline in logf:
                             if logline.startswith("Thread"):
-                                match = re.search(f"Thread {scheduled_coreid} processed (-?\d+) instructions", logline)
+                                match = re.search(f"Thread {scheduled_coreid} processed (-?\\d+) instructions", logline)
                                 if match:
                                     instructions_processed_ideal = match.group(1)
                                     break
@@ -212,6 +219,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                         "file": simulation_file_path,
                         "weight": weight,
                         "study_output": study_output,
+                        "study_output_standard": study_output_standard,
                         "was_converted": True,
                         "conversion_log": str(logfile),
                         "converted_instructions": instructions_processed,
@@ -230,6 +238,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                         "file": simulation_file_path,
                         "weight": weight,
                         "study_output": study_output,
+                        "study_output_standard": study_output_standard,
                         "was_converted": False,
                     }
             # /mnt/storage/traces/gtrace_v2_champsim_perthread_1.5Binstr/arizona/16362031984258116688.2763650.memtrace_0000.champsim.gz
@@ -262,6 +271,20 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 cores_ret[cpu]["branch_predictor"]["btb_misses"] = int(match.group(5))
                 cores_ret[cpu]["branch_predictor"]["branches"] = int(match.group(6))
                 cores_ret[cpu]["branch_predictor"]["branches_mispredicted"] = int(match.group(7))
+            match = re.search(r"CPU (\d+) TopDown Slots Retiring: (\d+) FrontendBound: (\d+) BackendBound: (\d+) BadSpec: (\d+)", line)
+            if match:
+                assert(int(match.group(1)) == cpu)
+                cores_ret[cpu]["topdown"] = {}
+                cores_ret[cpu]["topdown"]["retiring"] = int(match.group(2))
+                cores_ret[cpu]["topdown"]["frontend_bound"] = int(match.group(3))
+                cores_ret[cpu]["topdown"]["backend_bound"] = int(match.group(4))
+                cores_ret[cpu]["topdown"]["bad_spec"] = int(match.group(5))
+            match = re.search(r"CPU (\d+) TopDown BackendBound Breakdown ROBFull: (\d+) LQShort: (\d+) SQShort: (\d+)", line)
+            if match:
+                assert(int(match.group(1)) == cpu)
+                cores_ret[cpu]["topdown"]["backend_robfull"] = int(match.group(2))
+                cores_ret[cpu]["topdown"]["backend_lqshort"] = int(match.group(3))
+                cores_ret[cpu]["topdown"]["backend_sqshort"] = int(match.group(4))
             match = re.search(r"^([A-Z_]+): ([\d.]+) (\d+) (\d+) (\d+) (\d+) (\d+)", line)
             if match:
                 bname = match.group(1)
@@ -457,7 +480,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
     return ret
 
 def round_floats(o):
-    if isinstance(o, float): return round(o, 4)
+    if isinstance(o, float): return round(o, 5)
     if isinstance(o, dict): return {k: round_floats(v) for k, v in o.items()}
     if isinstance(o, (list, tuple)): return [round_floats(x) for x in o]
     return o
@@ -465,36 +488,44 @@ def round_floats(o):
 def parse_champsim_config(dir_name):
     ret = {}
     commas = list(map(lambda x: x[1:], dir_name[len("champsim"):].split(",")))
+    is_base = True
     for comma in commas:
         # champsim_tlbs,_memory,_llc.8M.drrip.no,_l2c.2M.drrip.newbop,_l1i.32K.drrip.next_line,_l1d.48K.drrip.newstride,_core.tage,
         if comma.startswith("tlb"):
             #ret["tlb_config"] = {"raw": comma} 
             dots = comma.split(".")
             ret["tlb_config"] = {"raw": comma, "component": dots[0], "ncores": dots[1], "version": dots[2], "base_diff": dots[3]}
+            if len(dots[3]) != 0: is_base = False
         elif comma.startswith("memory"):
             #ret["mem_config"] = {"raw": comma}
             dots = comma.split(".")
             ret["mem_config"] = {"raw": comma, "component": dots[0], "ncores": dots[1], "version": dots[2], "base_diff": dots[3]}
+            if len(dots[3]) != 0: is_base = False
         elif comma.startswith("llc"):
             dots = comma.split(".")
             #ret["llc_config"] = {"raw": comma, "size": dots[1], "replacement": dots[2], "prefetcher": dots[3]}
             ret["llc_config"] = {"raw": comma, "component": dots[0], "ncores": dots[1], "version": dots[2], "base_diff": dots[3]}
+            if len(dots[3]) != 0: is_base = False
         elif comma.startswith("l2c"):
             dots = comma.split(".")
             #ret["l2c_config"] = {"raw": comma, "size": dots[1], "replacement": dots[2], "prefetcher": dots[3]}
             ret["l2c_config"] = {"raw": comma, "component": dots[0], "ncores": dots[1], "version": dots[2], "base_diff": dots[3]}
+            if len(dots[3]) != 0: is_base = False
         elif comma.startswith("l1i"):
             dots = comma.split(".")
             #ret["l1i_config"] = {"raw": comma, "size": dots[1], "replacement": dots[2], "prefetcher": dots[3]}
             ret["l1i_config"] = {"raw": comma, "component": dots[0], "ncores": dots[1], "version": dots[2], "base_diff": dots[3]}
+            if len(dots[3]) != 0: is_base = False
         elif comma.startswith("l1d"):
             dots = comma.split(".")
             #ret["l1d_config"] = {"raw": comma, "size": dots[1], "replacement": dots[2], "prefetcher": dots[3]}
             ret["l1d_config"] = {"raw": comma, "component": dots[0], "ncores": dots[1], "version": dots[2], "base_diff": dots[3]}
+            if len(dots[3]) != 0: is_base = False
         elif comma.startswith("core"):
             dots = comma.split(".")
             #ret["core_config"] = {"raw": comma, "branch_predictor": dots[1]}
             ret["core_config"] = {"raw": comma, "component": dots[0], "ncores": dots[1], "version": dots[2], "base_diff": dots[3]}
+            if len(dots[3]) != 0: is_base = False
         elif len(comma) == 0:
             pass
         else:
@@ -502,6 +533,7 @@ def parse_champsim_config(dir_name):
             #print(comma)
             #sys.exit(1)
             return parse_champsim_config("champsim_core.UNKNOWN.UNKNOWN.UNKNOWN,_l1i.UNKNOWN.UNKNOWN.UNKNOWN,_l1d.UNKNOWN.UNKNOWN.UNKNOWN,_l2c.UNKNOWN.UNKNOWN.UNKNOWN,_llc.UNKNOWN.UNKNOWN.UNKNOWN,_memory.UNKNOWN.UNKNOWN.UNKNOWN,_tlbs.UNKNOWN.UNKNOWN.UNKNOWN")
+    ret["is_base"] = is_base
     return ret
 
 def parse_filename(file_name): 

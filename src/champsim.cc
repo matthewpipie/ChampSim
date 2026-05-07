@@ -284,6 +284,10 @@ void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
   vector<uint64_t> reuse_dists_access;
   unordered_map<uint64_t, vector<uint64_t>> i_line_uses;
   vector<uint64_t> i_reuse_dists;
+  uint64_t last_branch = 0;
+  uint64_t last_taken_branch = 0;
+  vector<uint64_t> branch_distances;
+  vector<uint64_t> taken_branch_distances;
 
   for (auto &phase : phases) {
     auto [phase_name, is_warmup, length, trace_index, trace_names] = phase;
@@ -329,6 +333,15 @@ void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
             i_reuse_dists.push_back(i_v.back() - i_v[i_v.size() - 2]);
         }
 
+        if (instr.is_branch) {
+            branch_distances.push_back(study_instr - last_branch);
+            last_branch = study_instr;
+            if (instr.branch_taken) {
+                taken_branch_distances.push_back(study_instr - last_taken_branch);
+                last_taken_branch = study_instr;
+            }
+        }
+
         study_instr++;
       }
     }
@@ -345,6 +358,9 @@ void study_trace(std::vector<phase_info> &phases, tracereader& trace) {
   make_print_hist("data reuse", reuse_dists);
   make_print_hist("data reuse_access", reuse_dists_access);
   make_print_hist("instruction reuse", i_reuse_dists);
+
+  make_print_hist("branch freq", branch_distances);
+  make_print_hist("taken_branch freq", taken_branch_distances);
 
 }
 

@@ -6,6 +6,7 @@ from multiprocessing import Pool
 import subprocess
 import json
 import psutil
+import datetime
 
 JOBS_TODO = Path("jobs_todo/")
 JOBS_STARTING = Path("jobs_starting/")
@@ -52,7 +53,7 @@ def work(command_outfile):
     # done
     # move jobfile
     move_to(JOBS_WIP, JOBS_DONE if not err else JOBS_FAILED, jobname)
-    print(f"Finished: {jobname}")
+    print(f"Finished: {jobname},", str(datetime.datetime.now()))
     TRIGGER += 1
 
 if __name__ == '__main__':

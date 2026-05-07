@@ -23,6 +23,7 @@
 #include <functional>
 #include <limits>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "address.h"
@@ -140,6 +141,18 @@ private:
 
     auto smem_end = std::remove(std::begin(instr.source_memory), std::end(instr.source_memory), uint64_t{0});
     std::transform(std::begin(instr.source_memory), smem_end, std::back_inserter(this->source_memory), [](auto x) { return champsim::address{x}; });
+
+    // Some traces (e.g. CloudSuite) mark branches without listing IP as a destination; the classifier below needs writes_ip.
+    if (instr.is_branch) {
+      auto ip_already_dest =
+          std::find(std::begin(destination_registers), std::end(destination_registers), champsim::REG_INSTRUCTION_POINTER) != std::end(destination_registers);
+      if (!ip_already_dest) {
+        destination_registers.push_back(champsim::REG_INSTRUCTION_POINTER);
+        if constexpr (!std::is_same_v<T, cloudsuite_instr>) {
+          assert(false);
+        }
+      }
+    }
 
     bool writes_sp = std::count(std::begin(destination_registers), std::end(destination_registers), champsim::REG_STACK_POINTER);
     bool writes_ip = std::count(std::begin(destination_registers), std::end(destination_registers), champsim::REG_INSTRUCTION_POINTER);

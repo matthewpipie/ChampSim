@@ -46,6 +46,8 @@ std::vector<std::string> champsim::plain_printer::format(O3_CPU::stats_type stat
       std::accumulate(std::begin(types), std::end(types), 0LL, [tbt = stats.total_branch_types](auto acc, auto next) { return acc + tbt.value_or(next, 0); }));
   auto total_mispredictions = std::ceil(
       std::accumulate(std::begin(types), std::end(types), 0LL, [btm = stats.branch_type_misses](auto acc, auto next) { return acc + btm.value_or(next, 0); }));
+  auto total_btb_misses = std::ceil(
+      std::accumulate(std::begin(types), std::end(types), 0LL, [bm = stats.btb_misses](auto acc, auto next) { return acc + bm.value_or(next, 0); }));
 
   std::vector<std::string> lines{};
   lines.push_back(fmt::format("{} cumulative IPC: {} instructions: {} cycles: {}", stats.name, ::print_ratio(stats.instrs(), stats.cycles()), stats.instrs(),
@@ -55,7 +57,12 @@ std::vector<std::string> champsim::plain_printer::format(O3_CPU::stats_type stat
                               ::print_ratio(100 * (total_branch - total_mispredictions), total_branch),
                               ::print_ratio(std::kilo::num * total_mispredictions, stats.instrs()),
                               ::print_ratio(stats.total_rob_occupancy_at_branch_mispredict, total_mispredictions),
-                              stats.btb_misses.total(), total_branch, total_mispredictions));
+                              total_btb_misses, total_branch, total_mispredictions));
+
+  lines.push_back(fmt::format("{} TopDown Slots Retiring: {} FrontendBound: {} BackendBound: {} BadSpec: {}", stats.name,
+                              stats.td_retiring_slots, stats.td_frontend_bound_slots, stats.td_backend_bound_slots, stats.td_bad_spec_slots));
+  lines.push_back(fmt::format("{} TopDown BackendBound Breakdown ROBFull: {} LQShort: {} SQShort: {}", stats.name,
+                              stats.td_backend_rob_full_slots, stats.td_backend_lq_short_slots, stats.td_backend_sq_short_slots));
 
   lines.emplace_back("Branch type MPKI, Branches, Misses, BP Misses, BTB Misses, Both Misses");
   for (auto idx : types) {

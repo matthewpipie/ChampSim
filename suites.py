@@ -1,4 +1,6 @@
 from pathlib import Path
+import pandas as pd
+import sys
 
 # Bytes per trace record in inc/trace_instruction.h (verified via sizeof with g++):
 #   input_instr         -> 64 (default ChampSim trace format)
@@ -65,6 +67,68 @@ class GoogleSuite:
             return f"/mnt/storage/traces/analysis/googleV2/{executable_name}"
         else:
             return f"results_googleV2_1/{executable_name}"
+
+class GooglePerThreadSuite:
+    BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_champsim_perthread_1.5Binstr/")
+    WARMUP = 50_000_000
+    SIMTIME = 100_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
+    def __init__(self):
+        self._schedule_df = None
+    def _get_schedule_df(self):
+        if self._schedule_df is None:
+            my_csv = "~/schedule_updated.csv"
+            self._schedule_df = pd.read_csv(Path(my_csv).expanduser())
+        return self._schedule_df
+    def get_workloads(self):
+        return sorted(map(lambda x: x.name, self.BASE_DIR.glob("*")))
+    def get_traces_and_weights_in_workload(self, workload):
+        tids_and_traces = list(sorted(map(lambda x: (x.name.split(".")[1], x), (self.BASE_DIR / workload).glob("*.gz"))))
+        traces = list(map(lambda x: x[1], tids_and_traces))
+
+        # Build {thread_id: instructions_ran} for this workload.
+        # Rows indicate the NEW thread at a core switch point; thread -1 is a sentinel
+        # marking the final switch point/end marker for the preceding real thread.
+        df = self._get_schedule_df()
+        wl_df = df[df["workload"] == workload].copy()
+        wl_df = wl_df.sort_values(["core id", "instruction number"], kind="stable")
+        wl_df["next_instruction_number"] = wl_df.groupby("core id")["instruction number"].shift(-1)
+        wl_df["instructions_ran"] = (
+            wl_df["next_instruction_number"] - wl_df["instruction number"]
+        ).fillna(0).clip(lower=0)
+
+        # Attribute each interval to the current row's thread, excluding sentinel -1.
+        tid_to_instr = (
+            wl_df[wl_df["thread id"] != -1]
+            .groupby("thread id")["instructions_ran"]
+            .sum()
+            .astype("int64")
+            .to_dict()
+        )
+
+        # Convert file-derived tids from str to int for matching.
+        trace_tids = list(map(lambda x: int(x[0]), tids_and_traces))
+        missing_tids = [tid for tid in trace_tids if tid not in tid_to_instr]
+        assert len(missing_tids) == 0, f"Missing tids in schedule map for workload {workload}: {missing_tids}"
+        total_instr = sum(map(lambda tid: tid_to_instr[tid], trace_tids))
+        assert total_instr > 0, f"Total instructions for workload {workload} must be > 0"
+
+        out = []
+        # sweight = 0
+        for tid, trace in tids_and_traces:
+            tid_instr = tid_to_instr[int(tid)]
+            weight = tid_instr / total_instr
+            # if weight < 0.01:
+                # print(f"SKIPPING {trace}, weight < 1%")
+                # continue
+                # pass
+            # sweight += weight
+            out.append([trace, weight, self.WARMUP, self.SIMTIME, []])
+        # print(f"TOTAL WEIGHT {sweight}")
+        return out
+    def name(self):
+        return "googleV2perthread"
+
 
 class QualcommSuite:
     BASE_DIR = Path("/mnt/storage/traces/qualcomm/ipc1_public/")
@@ -182,10 +246,11 @@ class LigraSuite:
         return "ligra"
 
 
-SUITES = [SpecSuite(), GoogleSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
+SUITES = [SpecSuite(), GoogleSuite(), GooglePerThreadSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
 SUITE_MAP = {x.name(): x for x in SUITES}
 
 if __name__ == "__main__":
+    sortem = len(sys.argv) == 2
     wln = 0
     trn = 0
     for k, v in SUITE_MAP.items():
@@ -196,6 +261,9 @@ if __name__ == "__main__":
             wln = wln + 1
             traces = v.get_traces_and_weights_in_workload(wl)
             print(f"\tWorkload {wl} ({len(traces)} traces)")
+            if sortem:
+                traces.sort(key=lambda x: x[1], reverse=True)
+            cumweight = 0
             for trace in traces:
                 trn = trn + 1
                 trnl = trnl + 1
@@ -204,7 +272,8 @@ if __name__ == "__main__":
                 warmup = trace[2]
                 simtime = trace[3]
                 flags = trace[4]
-                print(f"\t\t[{weight}] Trace {file} (warmup {warmup} simtime {simtime})")
+                cumweight += weight
+                print(f"\t\t[{weight} {cumweight}] Trace {file} (warmup {warmup} simtime {simtime})")
         print(f"Suite {k} end, ({len(wls)} workloads) with ({trnl} traces)")
     print(f"Total suites: {len(SUITE_MAP.items())}")
     print(f"Total workloads: {wln}")

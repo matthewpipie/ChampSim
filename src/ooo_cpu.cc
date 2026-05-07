@@ -467,7 +467,55 @@ long O3_CPU::dispatch_instruction()
     ROB.back().ready_time = current_time + (warmup ? champsim::chrono::clock::duration{} : SCHEDULING_LATENCY);
   }
 
-  return available_dispatch_bandwidth.amount_consumed();
+  long const dispatched = available_dispatch_bandwidth.amount_consumed();
+
+  // Top-down level-1 slot accounting. Every dispatch slot in this cycle gets
+  // charged to exactly one bucket. We classify the *unused* slots by the first
+  // condition that prevented dispatch, evaluated against the post-loop state
+  // (this captures, e.g., a ROB that became full mid-cycle after a few
+  // dispatches succeeded -- those remaining slots are correctly backend-bound).
+  auto const width = static_cast<long>(DISPATCH_WIDTH);
+  long const unused = width - dispatched;
+  sim_stats.td_retiring_slots += static_cast<uint64_t>(dispatched);
+  if (unused > 0) {
+    bool const rob_full = std::size(ROB) == ROB_SIZE;
+    bool const dispatch_buffer_empty = std::empty(DISPATCH_BUFFER);
+
+    bool lq_short = false;
+    bool sq_short = false;
+    if (!dispatch_buffer_empty) {
+      auto const lq_free =
+          (std::size_t)std::count_if(std::begin(LQ), std::end(LQ), [](const auto& lq_entry) { return !lq_entry.has_value(); });
+      lq_short = lq_free < std::size(DISPATCH_BUFFER.front().source_memory);
+      sq_short = (std::size(DISPATCH_BUFFER.front().destination_memory) + std::size(SQ)) > SQ_SIZE;
+    }
+
+    bool const backend_blocking = rob_full || lq_short || sq_short;
+    bool const in_mispredict_pause = current_time < fetch_resume_time;
+    auto const unused_u = static_cast<uint64_t>(unused);
+
+    if (backend_blocking) {
+      sim_stats.td_backend_bound_slots += unused_u;
+      // Sub-attribution in priority order ROB -> LQ -> SQ. This mirrors the
+      // order conditions appear in the while-loop above and partitions
+      // td_backend_bound_slots exactly.
+      if (rob_full) {
+        sim_stats.td_backend_rob_full_slots += unused_u;
+      } else if (lq_short) {
+        sim_stats.td_backend_lq_short_slots += unused_u;
+      } else {
+        sim_stats.td_backend_sq_short_slots += unused_u;
+      }
+    } else if (in_mispredict_pause) {
+      sim_stats.td_bad_spec_slots += unused_u;
+    } else {
+      // dispatch_buffer empty, or its head's ready_time > current_time:
+      // backend had room, frontend failed to deliver a ready uop.
+      sim_stats.td_frontend_bound_slots += unused_u;
+    }
+  }
+
+  return dispatched;
 }
 
 long O3_CPU::schedule_instruction()

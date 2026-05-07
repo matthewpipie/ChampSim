@@ -66,6 +66,22 @@ struct cpu_stats {
   long long end_cycles = 0;
   uint64_t total_rob_occupancy_at_branch_mispredict = 0;
 
+  // Top-down (Yasin level 1) dispatch-slot accounting. Each cycle, every
+  // dispatch slot (DISPATCH_WIDTH per cycle) is charged to exactly one bucket,
+  // so the four counters sum to cycles() * DISPATCH_WIDTH.
+  uint64_t td_retiring_slots = 0;       // a uop was dispatched into the ROB
+  uint64_t td_frontend_bound_slots = 0; // backend had room, frontend had nothing ready
+  uint64_t td_backend_bound_slots = 0;  // ROB / LQ / SQ blocked dispatch (sum of the three sub-counters below)
+  uint64_t td_bad_spec_slots = 0;       // dispatch idle while in mispredict pause
+
+  // Backend-bound breakdown. Each backend-bound slot is attributed to the
+  // first applicable cause in priority order ROB -> LQ -> SQ (matching the
+  // order the conditions are checked in the dispatch loop). The three
+  // sub-counters partition td_backend_bound_slots exactly.
+  uint64_t td_backend_rob_full_slots = 0;  // ROB had no free entry
+  uint64_t td_backend_lq_short_slots = 0;  // ROB had room but LQ lacked entries for the head's loads
+  uint64_t td_backend_sq_short_slots = 0;  // ROB & LQ had room but SQ lacked entries for the head's stores
+
   std::unordered_map<cpu_portion, std::map<uint64_t, uint64_t>> cpu_portion_distributions = {};
   std::unordered_map<cpu_buffer, std::map<size_t, uint64_t>> cpu_buffer_distributions = {};
 

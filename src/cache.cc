@@ -169,8 +169,8 @@ champsim::address CACHE::module_address(const T& element) const
 template <typename T>
 bool CACHE::module_is_instr(const T& element) const
 {
-  //return element.is_instr;
-  return false;
+  return element.is_instr;
+  // return false;
 }
 
 bool CACHE::handle_fill(const fill_type& fill)
@@ -233,10 +233,10 @@ bool CACHE::handle_fill(const fill_type& fill)
   }
 
   uint32_t metadata_thru = fill.data_promise->pf_metadata;
-  if (!module_is_instr(fill)) { // limiting only for data line fills. TODO trial and error
+  // if (!module_is_instr(fill)) { // limiting only for data line fills.
     metadata_thru = impl_prefetcher_cache_fill(module_address(fill), get_set_index(fill.address), way_idx, (fill.type == access_type::PREFETCH),
                                                evicting_address, fill.data_promise->pf_metadata);
-  }
+  // }
   impl_replacement_cache_fill(fill.cpu, get_set_index(fill.address), way_idx, module_address(fill), fill.ip, evicting_address, fill.type);
 
   if (way != set_end) {
@@ -273,7 +273,7 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
   }
 
   auto metadata_thru = handle_pkt.pf_metadata;
-  if (should_activate_prefetcher(handle_pkt) && !module_is_instr(handle_pkt)) { // limiting only to data line hits
+  if (should_activate_prefetcher(handle_pkt) /*&& !module_is_instr(handle_pkt)*/) { // limiting only to data line hits
     metadata_thru = impl_prefetcher_cache_operate(module_address(handle_pkt), handle_pkt.ip, hit, useful_prefetch, handle_pkt.type, metadata_thru);
   }
 
