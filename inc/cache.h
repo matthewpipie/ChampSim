@@ -214,6 +214,15 @@ public:
   [[deprecated("Use get_set_index() instead.")]] [[nodiscard]] uint64_t get_set(uint64_t address) const;
   [[deprecated("This function should not be used to access the blocks directly.")]] [[nodiscard]] uint64_t get_way(uint64_t address, uint64_t set) const;
 
+  struct line_kind_counts {
+    std::size_t invalid = 0;
+    std::size_t prefetch_unknown = 0;
+    std::size_t data = 0;
+    std::size_t instr = 0;
+  };
+
+  [[nodiscard]] line_kind_counts count_line_kinds() const;
+
   long invalidate_entry(champsim::address inval_addr);
   bool can_prefetch_line();
   bool prefetch_line(champsim::address pf_addr, bool fill_this_level, uint32_t prefetch_metadata);

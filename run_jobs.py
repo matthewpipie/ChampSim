@@ -64,6 +64,11 @@ if __name__ == '__main__':
     ncores = int(sys.argv[1])
     TRIGGER = NUM_JOBS_OK
 
+    if len(list(JOBS_STARTING.iterdir())) != 0:
+        raise ValueError("clear jobs_starting")
+    if len(list(JOBS_WIP.iterdir())) != 0:
+        raise ValueError("clear jobs_wip")
+
     print("Number of cores: ", ncores)
     with Pool(ncores, maxtasksperchild=1) as pool:
         while True:
@@ -81,7 +86,7 @@ if __name__ == '__main__':
                     else:
                         #time.sleep(10)
                         pass
-            time.sleep(2)
+            time.sleep(0.1)
             if get_mem_util() > 0.97:
                 print("ERROR: OOM! Quitting...")
                 pool.terminate()

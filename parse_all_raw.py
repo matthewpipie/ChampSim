@@ -54,6 +54,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
     total_missed_reads = {}
     total_hit_reads = {}
     ipc_log = defaultdict(list)
+    occupancy_log = defaultdict(list)
     warmup_endtime = {}
     cpu = None
     with open(fi, 'r') as f:
@@ -73,7 +74,26 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 instrs = int(match.group(2))
                 cycles = int(match.group(3))
                 ipc_log[cpu].append([instrs, cycles])
-
+            """
+            Heartbeat CPU 0 cache LLC inv: 54832 pf: 6565 data: 2891 instr: 1248
+            Heartbeat CPU 0 cache cpu0_DTLB inv: 0 pf: 0 data: 64 instr: 0
+            Heartbeat CPU 0 cache cpu0_ITLB inv: 44 pf: 0 data: 0 instr: 20
+            Heartbeat CPU 0 cache cpu0_L1D inv: 0 pf: 66 data: 702 instr: 0
+            Heartbeat CPU 0 cache cpu0_L1I inv: 0 pf: 56 data: 0 instr: 456
+            Heartbeat CPU 0 cache cpu0_L2C inv: 22072 pf: 3801 data: 3813 instr: 3082
+            Heartbeat CPU 0 cache cpu0_STLB inv: 1198 pf: 0 data: 318 instr: 20
+            """
+            match = re.search(r"Heartbeat CPU (\d+) cache (\w+) inv: (\d+) pf: (\d+) data: (\d+) instr: (\d+)", line)
+            if match:
+                cpu = int(match.group(1))
+                if cpu in warmup_endtime:
+                    # warmup complete
+                    cache = match.group(2)
+                    invalid = int(match.group(3))
+                    prefetched = int(match.group(4))
+                    datas = int(match.group(5))
+                    instructs = int(match.group(6))
+                    occupancy_log[cache].append([instrs,cycles,invalid,prefetched,datas,instructs])
 
             if line.startswith("=== Simulation ==="):
                 active = 1
@@ -95,7 +115,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 #study_output_file = STUDY_DIR / fi.parent.parent.name / fi.parent.name / fi.name
                 if metadata["champsim_config"]["is_base"]:
                     study_output_file = STUDY_DIR / fi.parent.name / fi.name
-                    study_output_standard_file = STUDY_DIR_STANDARD / fi.parent.name / fi.name
+                    study_output_standard_file = STUDY_DIR_STANDARD / fi.parent.name / fi.name.replace(str(metadata["warmup_instrs"]) + "," + str(metadata["roi_instrs"]) + ".", "0,100000000.")
                     study_output = parse_study_output(study_output_file)
                     study_output_standard = parse_study_output(study_output_standard_file)
                 else:
@@ -330,6 +350,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                         "total_missed_reads": 0,
                         "total_hit_reads": 0,
                         "mshr_distribution": {},
+                        "__occupancy_log": occupancy_log[dest_cache],
                     }
 
                 access = int(match.group(5))
@@ -383,6 +404,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                         "total_missed_reads": 0,
                         "total_hit_reads": 0,
                         "mshr_distribution": {},
+                        "__occupancy_log": occupancy_log[cache],
                     }
                 caches_ret[cache]["mshr_distribution"][f"{int(match.group(2)):03d}"] = int(match.group(3))
 
@@ -428,7 +450,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
 
         cdata["prefetches"]["accuracy"] = accuracy
         cdata["prefetches"]["coverage"] = coverage
-
+        
         sumdata = {}
         for sourcecpu, sourcestat in cdata["source"].items():
             for atype, adata in sourcestat.items():
@@ -461,6 +483,25 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 adata["access_proportion"] = access / sumdata["TOTAL"]["access"]
 
         cdata["source"]["sum"] = sumdata
+        
+        def avg(biglist, dim):
+            n = 0
+            summ = 0
+            for item in biglist:
+                toavg = item[dim]
+                summ += toavg
+                n += 1
+            return summ / n
+
+        if len(occupancy_log[cname]) == 0:
+            cdata["occupancy_avg"] = {"inv": 1, "pf": 0, "data": 0, "instr": 0}
+        else:
+            cdata["occupancy_avg"] = {
+                "inv": avg(occupancy_log[cname], 2),
+                "pf": avg(occupancy_log[cname], 3),
+                "data": avg(occupancy_log[cname], 4),
+                "instr": avg(occupancy_log[cname], 5),
+            }
 
     for (coreid, core) in cores_ret.items():
         core["caches"] = {}
@@ -480,7 +521,7 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
     return ret
 
 def round_floats(o):
-    if isinstance(o, float): return round(o, 5)
+    if isinstance(o, float): return round(o, 10)
     if isinstance(o, dict): return {k: round_floats(v) for k, v in o.items()}
     if isinstance(o, (list, tuple)): return [round_floats(x) for x in o]
     return o
@@ -545,6 +586,8 @@ def parse_filename(file_name):
     ret["run_num"] = int(commas[1])
     ret["cores_per_run"] = int(commas[2])
     ret["core_offset"] = int(commas[3])
+    ret["warmup_instrs"] = int(commas[4])
+    ret["roi_instrs"] = int(commas[5])
     return ret
 
 if __name__ == "__main__":
@@ -581,10 +624,14 @@ if __name__ == "__main__":
             res_tmp = []
             for outfile in (cs_dir / suite_name).glob("*.raw"):
                 meta = parse_filename(Path(outfile).name)
+                if meta["workload"] not in workloads:
+                    print(f"Workload {meta['workload']} not real! skipping")
+                    continue
                 meta |= {"champsim_config": cfg_dict, "suite": suite_name}
                 print(f"Parsing: {outfile}")
                 #print(f"Parsing: {outfile} with meta {meta}")
                 res_tmp += [parse_one_output_file(outfile, meta, suite_workload_weights)]
+
             if all([len(v) == 0 for k, v in suite_workload_weights.items()]): # ensure all traces actually got ran
             #if True:
                 # all traces got ran

@@ -54,22 +54,24 @@ const unsigned PAGE_SIZE = configured_environment::page_size;
 const unsigned LOG2_BLOCK_SIZE = champsim::lg2(BLOCK_SIZE);
 const unsigned LOG2_PAGE_SIZE = champsim::lg2(PAGE_SIZE);
 
-// Singleton environment pointer
-static configured_environment* g_env;
+namespace champsim
+{
+environment* g_env = nullptr;
+}
 
 //------------------------------------//
 // DPC4 API
 //------------------------------------//
 uint8_t get_dram_bw()
 {
-  MEMORY_CONTROLLER& mc = g_env->dram_view();
+  MEMORY_CONTROLLER& mc = champsim::g_env->dram_view();
   return mc.get_bw();
 }
 
 long long get_retired_insts(uint8_t cpu_id)
 {
   assert(cpu_id < NUM_CPUS);
-  O3_CPU& cpu = g_env->cpu_view().at(cpu_id);
+  O3_CPU& cpu = champsim::g_env->cpu_view().at(cpu_id);
   return cpu.num_retired;
 }
 
@@ -115,7 +117,7 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   CLI11_PARSE(app, argc, argv);
 
-  g_env = &gen_environment;
+  champsim::g_env = &gen_environment;
   init_event_listeners(requested_listeners);
 
   const bool warmup_given = (warmup_instr_option->count() > 0) || (deprec_warmup_instr_option->count() > 0);

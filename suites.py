@@ -1,4 +1,5 @@
 from pathlib import Path
+import numpy as np
 import pandas as pd
 import sys
 
@@ -84,9 +85,8 @@ class GooglePerThreadSuite:
         return sorted(map(lambda x: x.name, self.BASE_DIR.glob("*")))
     def get_traces_and_weights_in_workload(self, workload):
         tids_and_traces = list(sorted(map(lambda x: (x.name.split(".")[1], x), (self.BASE_DIR / workload).glob("*.gz"))))
-        traces = list(map(lambda x: x[1], tids_and_traces))
 
-        # Build {thread_id: instructions_ran} for this workload.
+        # Build {thread_id: (warmup_instr, simtime_instr)} for this workload.
         # Rows indicate the NEW thread at a core switch point; thread -1 is a sentinel
         # marking the final switch point/end marker for the preceding real thread.
         df = self._get_schedule_df()
@@ -97,27 +97,62 @@ class GooglePerThreadSuite:
             wl_df["next_instruction_number"] - wl_df["instruction number"]
         ).fillna(0).clip(lower=0)
 
-        # Attribute each interval to the current row's thread, excluding sentinel -1.
-        tid_to_instr = (
+        # Clip each running interval to GoogleSuite phases (same trace semantics as googleV2):
+        #   warmup : [0, GoogleSuite.WARMUP)
+        #   sim ROI: [GoogleSuite.WARMUP, GoogleSuite.WARMUP + GoogleSuite.SIMTIME)
+        # Context switches can straddle 50M / 550M; split intervals at those boundaries.
+        W = GoogleSuite.WARMUP
+        E = GoogleSuite.WARMUP + GoogleSuite.SIMTIME
+        s_arr = wl_df["instruction number"].to_numpy(dtype=np.int64, copy=False)
+        n_arr = wl_df["next_instruction_number"].to_numpy(dtype=np.float64, copy=False)
+        valid = ~np.isnan(n_arr)
+        # Cast only finite next values; NaN cannot convert to int64 and would warn if we
+        # astype the whole column (last row per core has no next switch).
+        n_next_i64 = np.nan_to_num(n_arr, nan=0.0).astype(np.int64, copy=False)
+        n_i = np.where(valid, n_next_i64, s_arr)
+        warmup_part = np.where(
+            valid,
+            np.maximum(0, np.minimum(n_i, W) - np.maximum(s_arr, 0)),
+            0,
+        ).astype(np.int64)
+        simtime_part = np.where(
+            valid,
+            np.maximum(0, np.minimum(n_i, E) - np.maximum(s_arr, W)),
+            0,
+        ).astype(np.int64)
+        wl_df["warmup_instr"] = warmup_part
+        wl_df["simtime_instr"] = simtime_part
+
+        # Attribute each clipped interval to the current row's thread, excluding sentinel -1.
+        agg = (
             wl_df[wl_df["thread id"] != -1]
-            .groupby("thread id")["instructions_ran"]
+            .groupby("thread id")[["warmup_instr", "simtime_instr"]]
             .sum()
-            .astype("int64")
-            .to_dict()
         )
+        tid_to_instr = {
+            int(tid): (int(w), int(s))
+            for tid, w, s in zip(
+                agg.index,
+                agg["warmup_instr"],
+                agg["simtime_instr"],
+            )
+        }
 
         # Convert file-derived tids from str to int for matching.
         trace_tids = list(map(lambda x: int(x[0]), tids_and_traces))
         missing_tids = [tid for tid in trace_tids if tid not in tid_to_instr]
         assert len(missing_tids) == 0, f"Missing tids in schedule map for workload {workload}: {missing_tids}"
-        total_instr = sum(map(lambda tid: tid_to_instr[tid], trace_tids))
-        assert total_instr > 0, f"Total instructions for workload {workload} must be > 0"
+        total_sim_instr = sum(
+            tid_to_instr[tid][1] for tid in trace_tids
+        )
+        assert total_sim_instr > 0, f"Total instructions for workload {workload} must be > 0"
 
         out = []
         # sweight = 0
         for tid, trace in tids_and_traces:
-            tid_instr = tid_to_instr[int(tid)]
-            weight = tid_instr / total_instr
+            w_instr, s_instr = tid_to_instr[int(tid)]
+            # tid_instr = w_instr + s_instr
+            weight = s_instr / total_sim_instr
             # if weight < 0.01:
                 # print(f"SKIPPING {trace}, weight < 1%")
                 # continue
@@ -128,6 +163,88 @@ class GooglePerThreadSuite:
         return out
     def name(self):
         return "googleV2perthread"
+
+class GooglePerThreadLenSuite:
+    BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_champsim_perthread_1.5Binstr/")
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
+    def __init__(self):
+        self._schedule_df = None
+    def _get_schedule_df(self):
+        if self._schedule_df is None:
+            my_csv = "~/schedule_updated.csv"
+            self._schedule_df = pd.read_csv(Path(my_csv).expanduser())
+        return self._schedule_df
+    def get_workloads(self):
+        return sorted(map(lambda x: x.name, self.BASE_DIR.glob("*")))
+    def get_traces_and_weights_in_workload(self, workload):
+        tids_and_traces = list(sorted(map(lambda x: (x.name.split(".")[1], x), (self.BASE_DIR / workload).glob("*.gz"))))
+
+        # Build {thread_id: (warmup_instr, simtime_instr)} for this workload.
+        # Rows indicate the NEW thread at a core switch point; thread -1 is a sentinel
+        # marking the final switch point/end marker for the preceding real thread.
+        df = self._get_schedule_df()
+        wl_df = df[df["workload"] == workload].copy()
+        wl_df = wl_df.sort_values(["core id", "instruction number"], kind="stable")
+        wl_df["next_instruction_number"] = wl_df.groupby("core id")["instruction number"].shift(-1)
+        wl_df["instructions_ran"] = (
+            wl_df["next_instruction_number"] - wl_df["instruction number"]
+        ).fillna(0).clip(lower=0)
+
+        # Clip each running interval to GoogleSuite phases (same trace semantics as googleV2):
+        #   warmup : [0, GoogleSuite.WARMUP)
+        #   sim ROI: [GoogleSuite.WARMUP, GoogleSuite.WARMUP + GoogleSuite.SIMTIME)
+        # Context switches can straddle 50M / 550M; split intervals at those boundaries.
+        W = GoogleSuite.WARMUP
+        E = GoogleSuite.WARMUP + GoogleSuite.SIMTIME
+        s_arr = wl_df["instruction number"].to_numpy(dtype=np.int64, copy=False)
+        n_arr = wl_df["next_instruction_number"].to_numpy(dtype=np.float64, copy=False)
+        valid = ~np.isnan(n_arr)
+        # Cast only finite next values; NaN cannot convert to int64 and would warn if we
+        # astype the whole column (last row per core has no next switch).
+        n_next_i64 = np.nan_to_num(n_arr, nan=0.0).astype(np.int64, copy=False)
+        n_i = np.where(valid, n_next_i64, s_arr)
+        warmup_part = np.where(
+            valid,
+            np.maximum(0, np.minimum(n_i, W) - np.maximum(s_arr, 0)),
+            0,
+        ).astype(np.int64)
+        simtime_part = np.where(
+            valid,
+            np.maximum(0, np.minimum(n_i, E) - np.maximum(s_arr, W)),
+            0,
+        ).astype(np.int64)
+        wl_df["warmup_instr"] = warmup_part
+        wl_df["simtime_instr"] = simtime_part
+
+        # Attribute each clipped interval to the current row's thread, excluding sentinel -1.
+        agg = (
+            wl_df[wl_df["thread id"] != -1]
+            .groupby("thread id")[["warmup_instr", "simtime_instr"]]
+            .sum()
+        )
+        tid_to_instr = {
+            int(tid): (int(w), int(s))
+            for tid, w, s in zip(
+                agg.index,
+                agg["warmup_instr"],
+                agg["simtime_instr"],
+            )
+        }
+
+        # Convert file-derived tids from str to int for matching.
+        trace_tids = list(map(lambda x: int(x[0]), tids_and_traces))
+        missing_tids = [tid for tid in trace_tids if tid not in tid_to_instr]
+        assert len(missing_tids) == 0, f"Missing tids in schedule map for workload {workload}: {missing_tids}"
+
+        out = []
+        # sweight = 0
+        for tid, trace in tids_and_traces:
+            w_instr, s_instr = tid_to_instr[int(tid)]
+            if s_instr == 0: continue
+            out.append([trace, 1, w_instr, s_instr, []])
+        return out
+    def name(self):
+        return "googleV2perthreadlen"
 
 
 class QualcommSuite:
@@ -152,7 +269,9 @@ class Parsec21Suite:
     SIMTIME = 200_000_000
     TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
     def get_workloads(self):
-        return sorted(set(map(lambda x: x.name.split(".")[2], self.BASE_DIR.glob("*.champsimtrace.xz"))))
+        l = list(sorted(set(map(lambda x: x.name.split(".")[2], self.BASE_DIR.glob("*.champsimtrace.xz")))))
+        l = filter(lambda x: "vips" not in x, l)
+        return sorted(set(l))
     def get_traces_and_weights_in_workload(self, workload):
         traces = sorted(self.BASE_DIR.glob(f"parsec_2.1.{workload}.*.champsimtrace.xz"), key = lambda x:
             int(x.name.split("_")[2].split("M")[0]))
@@ -246,7 +365,7 @@ class LigraSuite:
         return "ligra"
 
 
-SUITES = [SpecSuite(), GoogleSuite(), GooglePerThreadSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
+SUITES = [SpecSuite(), GoogleSuite(), GooglePerThreadSuite(), GooglePerThreadLenSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
 SUITE_MAP = {x.name(): x for x in SUITES}
 
 if __name__ == "__main__":

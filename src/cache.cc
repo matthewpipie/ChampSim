@@ -27,6 +27,7 @@
 #include "champsim.h"
 #include "chrono.h"
 #include "deadlock.h"
+#include "access_type.h"
 #include "instruction.h"
 #include "util/algorithm.h"
 #include "util/bits.h"
@@ -144,6 +145,11 @@ auto CACHE::fill_block(fill_type fill, uint32_t metadata) -> BLOCK
   to_fill.valid = true;
   to_fill.prefetch = fill.prefetch_from_this;
   to_fill.dirty = (fill.type == access_type::WRITE);
+  if (fill.type == access_type::PREFETCH) {
+    to_fill.kind = champsim::line_kind::PrefetchUnknown;
+  } else {
+    to_fill.kind = fill.is_instr ? champsim::line_kind::Instr : champsim::line_kind::Data;
+  }
   to_fill.address = fill.address;
   to_fill.v_address = fill.v_address;
   to_fill.data = fill.data_promise->data;
@@ -283,6 +289,10 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
                                 hit);
 
   if (hit) {
+    if (way->kind == champsim::line_kind::PrefetchUnknown && handle_pkt.type != access_type::PREFETCH) {
+      way->kind = handle_pkt.is_instr ? champsim::line_kind::Instr : champsim::line_kind::Data;
+    }
+
     sim_stats.hits.increment(std::pair{handle_pkt.type, handle_pkt.cpu});
 
     response_type response{handle_pkt.address, handle_pkt.v_address, way->data, metadata_thru, handle_pkt.instr_depend_on_me};
@@ -582,6 +592,23 @@ long CACHE::invalidate_entry(champsim::address inval_addr)
   }
 
   return std::distance(begin, inv_way);
+}
+
+auto CACHE::count_line_kinds() const -> line_kind_counts
+{
+  line_kind_counts counts{};
+  for (const auto& b : block) {
+    if (!b.valid) {
+      ++counts.invalid;
+    } else if (b.kind == champsim::line_kind::PrefetchUnknown) {
+      ++counts.prefetch_unknown;
+    } else if (b.kind == champsim::line_kind::Instr) {
+      ++counts.instr;
+    } else {
+      ++counts.data;
+    }
+  }
+  return counts;
 }
 
 bool CACHE::can_prefetch_line() {

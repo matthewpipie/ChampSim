@@ -27,6 +27,7 @@
 #include "cache.h"
 #include "champsim.h"
 #include "deadlock.h"
+#include "environment.h"
 #include "event_listeners.h"
 #include "instruction.h"
 #include "util/span.h"
@@ -86,6 +87,15 @@ long O3_CPU::operate()
 
     fmt::print("Heartbeat CPU {} instructions: {} cycles: {} heartbeat IPC: {:.4g} cumulative IPC: {:.4g} (Simulation time: {:%H hr %M min %S sec})\n", cpu,
                num_retired, current_time.time_since_epoch() / clock_period, heartbeat_instr / heartbeat_cycle, phase_instr / phase_cycle, elapsed_time());
+
+    if (champsim::g_env != nullptr) {
+      for (auto cache_ref : champsim::g_env->cache_view()) {
+        CACHE& cache = cache_ref.get();
+        const auto counts = cache.count_line_kinds();
+        fmt::print("Heartbeat CPU {} cache {} inv: {} pf: {} data: {} instr: {}\n", cpu, cache.NAME, counts.invalid, counts.prefetch_unknown, counts.data,
+                   counts.instr);
+      }
+    }
 
     last_heartbeat_instr = num_retired;
     last_heartbeat_time = current_time;

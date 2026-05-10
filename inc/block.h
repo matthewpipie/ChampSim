@@ -21,10 +21,14 @@
 
 namespace champsim
 {
+enum class line_kind { PrefetchUnknown, Data, Instr };
+
 struct cache_block {
   bool valid = false;
   bool prefetch = false;
   bool dirty = false;
+
+  line_kind kind = line_kind::Data;
 
   champsim::address address{};
   champsim::address v_address{};

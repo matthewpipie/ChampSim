@@ -30,8 +30,8 @@ for n in $ns; do
     #l2cs="l2c.n.v1.prefetcher--bop_v1.json"
     #l2cs="l2c.n.v1.sets--4194304.json"
 
-    cores="core.$n.v2..json" #core.$n.v1.branch_predictor--cheating.json core.$n.v1.btb--cheating_btb.json core.$n.v1.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
-    #cores="core.$n.v2.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
+    #cores="core.$n.v2..json" #core.$n.v1.branch_predictor--cheating.json core.$n.v1.btb--cheating_btb.json core.$n.v1.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
+    cores="core.$n.v2.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
     #cores="core.$n.v2.btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
     #cores="core.$n.v2.branch_predictor--cheating.json core.$n.v2.btb--cheating_btb.json core.$n.v2.branch_predictor--cheating+btb--cheating_btb.json" # "core.$n.v1.mispredict-penalty--0.json" 
     #cores="core.$n.v1.sq_size--144.json"
