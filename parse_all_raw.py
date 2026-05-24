@@ -390,6 +390,8 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 dest_cache_type = dest_cache.split("_")[-1]
                 if filter_caches and dest_cache_type not in filter_caches: continue
                 average_miss_latency = float(match.group(4))
+                if cpu not in caches_ret[dest_cache]["source"]:
+                    caches_ret[dest_cache]["source"][cpu] = {}
                 caches_ret[dest_cache]["source"][cpu]["average_miss_latency"] = average_miss_latency
 
             match = re.search(r"^(\w+) MSHR_OCCUPANCY: (\d+): (\d+)$", line)

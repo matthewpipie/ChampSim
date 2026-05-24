@@ -234,12 +234,14 @@ void make_print_hist(std::string prologue, std::vector<uint64_t> &v) {
     uint64_t uniq = 0;
     std::unordered_map<uint64_t, uint64_t> hist;
     std::unordered_map<uint64_t, uint64_t> bin_hist;
+    std::unordered_map<uint64_t, uint64_t> bin_hist_sums;
     std::sort(v.begin(), v.end());
     for (auto &i : v) {
         if (hist[i] == 0) uniq++;
         hist[i]++;
         sum += i;
         bin_hist[64 - __builtin_clzll(i)]++;
+        bin_hist_sums[64 - __builtin_clzll(i)] += i;
     }
     for (size_t i = 0; i < 100; i++) {
         size_t p = i*v.size() / 100;
@@ -269,7 +271,7 @@ void make_print_hist(std::string prologue, std::vector<uint64_t> &v) {
     fmt::print("{} v1 {}\n", prologue, hist[1]);
     fmt::print("{} v2 {}\n", prologue, hist[2]);
     for (auto &[k, v] : bin_hist) {
-        fmt::print("{} bin{} {}\n", prologue, k, v);
+        fmt::print("{} bin{} {} {}\n", prologue, k, v, bin_hist_sums[k]);
     }
 }
 
