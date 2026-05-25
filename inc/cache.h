@@ -32,6 +32,7 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include "address.h"
@@ -171,6 +172,8 @@ public:
   bool prefetch_as_load;
   bool match_offset_bits;
   bool virtual_prefetch;
+  bool context_switch_aware{};
+  std::unordered_map<uint64_t, std::vector<BLOCK>> thread_snapshots_{};
   std::vector<access_type> pref_activate_mask;
 
   using stats_type = cache_stats;
@@ -184,6 +187,7 @@ public:
   void initialize() final;
   void begin_phase() final;
   void end_phase(unsigned cpu) final;
+  void handle_context_switch(uint64_t old_thread_id, uint64_t new_thread_id);
 
   [[deprecated]] std::size_t get_occupancy(uint8_t queue_type, champsim::address address) const;
   [[deprecated]] std::size_t get_size(uint8_t queue_type, champsim::address address) const;
@@ -249,6 +253,7 @@ public:
     virtual void impl_prefetcher_cycle_operate() = 0;
     virtual void impl_prefetcher_final_stats() = 0;
     virtual void impl_prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) = 0;
+    virtual void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) = 0;
   };
 
   struct replacement_module_concept {
@@ -264,6 +269,7 @@ public:
     virtual void impl_replacement_cache_fill(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip,
                                              champsim::address victim_addr, access_type type) = 0;
     virtual void impl_replacement_final_stats() = 0;
+    virtual void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) = 0;
   };
 
   template <typename... Ps>
@@ -283,6 +289,7 @@ public:
     void impl_prefetcher_cycle_operate() final;
     void impl_prefetcher_final_stats() final;
     void impl_prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) final;
+    void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) final;
   };
 
   template <typename... Rs>
@@ -305,6 +312,7 @@ public:
     void impl_replacement_cache_fill(uint32_t triggering_cpu, long set, long way, champsim::address full_addr, champsim::address ip,
                                      champsim::address victim_addr, access_type type) final;
     void impl_replacement_final_stats() final;
+    void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) final;
   };
 
   std::unique_ptr<prefetcher_module_concept> pref_module_pimpl;
@@ -319,6 +327,7 @@ public:
   void impl_prefetcher_cycle_operate() const;
   void impl_prefetcher_final_stats() const;
   void impl_prefetcher_branch_operate(champsim::address ip, uint8_t branch_type, champsim::address branch_target) const;
+  void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) const;
 
   void impl_initialize_replacement() const;
   [[nodiscard]] long impl_find_victim(uint32_t triggering_cpu, uint64_t instr_id, long set, const BLOCK* current_set, champsim::address ip,
@@ -335,7 +344,8 @@ public:
       : champsim::operable(b.m_clock_period), upper_levels(b.m_uls), lower_level(b.m_ll), lower_translate(b.m_lt), NAME(b.m_name), NUM_SET(b.get_num_sets()),
         NUM_WAY(b.get_num_ways()), MSHR_SIZE(b.get_num_mshrs()), PQ_SIZE(b.m_pq_size), HIT_LATENCY(b.get_hit_latency() * b.m_clock_period),
         FILL_LATENCY(b.get_fill_latency() * b.m_clock_period), OFFSET_BITS(b.m_offset_bits), MAX_TAG(b.get_tag_bandwidth()), MAX_FILL(b.get_fill_bandwidth()),
-        prefetch_as_load(b.m_pref_load), match_offset_bits(b.m_wq_full_addr), virtual_prefetch(b.m_va_pref), pref_activate_mask(b.m_pref_act_mask),
+        prefetch_as_load(b.m_pref_load), match_offset_bits(b.m_wq_full_addr), virtual_prefetch(b.m_va_pref),
+        context_switch_aware(b.m_context_switch_aware), pref_activate_mask(b.m_pref_act_mask),
         pref_module_pimpl(std::make_unique<prefetcher_module_model<Ps...>>(this)), repl_module_pimpl(std::make_unique<replacement_module_model<Rs...>>(this))
   {
   }
@@ -560,6 +570,30 @@ void CACHE::replacement_module_model<Rs...>::impl_replacement_final_stats()
     using namespace champsim::modules;
     if constexpr (replacement::has_final_stats<decltype(r)>)
       r.replacement_final_stats();
+  };
+
+  std::apply([&](auto&... r) { (..., process_one(r)); }, intern_);
+}
+
+template <typename... Ps>
+void CACHE::prefetcher_module_model<Ps...>::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+{
+  [[maybe_unused]] auto process_one = [&](auto& p) {
+    using namespace champsim::modules;
+    if constexpr (prefetcher::has_context_switch<decltype(p)>)
+      p.on_context_switch(old_thread_id, new_thread_id);
+  };
+
+  std::apply([&](auto&... p) { (..., process_one(p)); }, intern_);
+}
+
+template <typename... Rs>
+void CACHE::replacement_module_model<Rs...>::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+{
+  [[maybe_unused]] auto process_one = [&](auto& r) {
+    using namespace champsim::modules;
+    if constexpr (replacement::has_context_switch<decltype(r)>)
+      r.on_context_switch(old_thread_id, new_thread_id);
   };
 
   std::apply([&](auto&... r) { (..., process_one(r)); }, intern_);

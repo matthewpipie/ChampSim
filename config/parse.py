@@ -443,6 +443,11 @@ class NormalizedConfiguration:
             'btb': util.combine_named(*(c['_btb_data'] for c in cores), btb_context.find_all())
         }
 
+        if len(cores) > 1:
+            for cache in caches.values():
+                if cache.get('name') == 'LLC' and cache.get('context_switch_aware'):
+                    raise ValueError('context_switch_aware on LLC is not supported when num_cores > 1')
+
         config_extern = {
             **util.subdict(root_config, ('block_size', 'page_size', 'heartbeat_frequency')),
             'num_cores': len(cores)

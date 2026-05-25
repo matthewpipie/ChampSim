@@ -41,6 +41,7 @@ CACHE::CACHE(CACHE&& other)
       cpu(other.cpu), NAME(std::move(other.NAME)), NUM_SET(other.NUM_SET), NUM_WAY(other.NUM_WAY), MSHR_SIZE(other.MSHR_SIZE), PQ_SIZE(other.PQ_SIZE),
       HIT_LATENCY(other.HIT_LATENCY), FILL_LATENCY(other.FILL_LATENCY), OFFSET_BITS(other.OFFSET_BITS), block(std::move(other.block)), MAX_TAG(other.MAX_TAG),
       MAX_FILL(other.MAX_FILL), prefetch_as_load(other.prefetch_as_load), match_offset_bits(other.match_offset_bits), virtual_prefetch(other.virtual_prefetch),
+      context_switch_aware(other.context_switch_aware), thread_snapshots_(std::move(other.thread_snapshots_)),
       pref_activate_mask(std::move(other.pref_activate_mask)),
 
       sim_stats(std::move(other.sim_stats)), roi_stats(std::move(other.roi_stats)),
@@ -79,6 +80,8 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   this->prefetch_as_load = other.prefetch_as_load;
   this->match_offset_bits = other.match_offset_bits;
   this->virtual_prefetch = other.virtual_prefetch;
+  this->context_switch_aware = other.context_switch_aware;
+  this->thread_snapshots_ = std::move(other.thread_snapshots_);
   this->pref_activate_mask = std::move(other.pref_activate_mask);
 
   this->sim_stats = std::move(other.sim_stats);
@@ -877,6 +880,26 @@ void CACHE::impl_replacement_cache_fill(uint32_t triggering_cpu, long set, long 
 }
 
 void CACHE::impl_replacement_final_stats() const { repl_module_pimpl->impl_replacement_final_stats(); }
+
+void CACHE::handle_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+{
+  if (!context_switch_aware) {
+    return;
+  }
+
+  thread_snapshots_[old_thread_id] = block;
+  if (auto snapshot_it = thread_snapshots_.find(new_thread_id); snapshot_it != thread_snapshots_.end()) {
+    block = snapshot_it->second;
+  }
+
+  impl_context_switch(old_thread_id, new_thread_id);
+}
+
+void CACHE::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) const
+{
+  pref_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
+  repl_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
+}
 
 void CACHE::initialize()
 {

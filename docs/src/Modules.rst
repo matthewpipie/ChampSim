@@ -78,6 +78,11 @@ A branch predictor module may implement three functions.
 
    This function is called when a branch is resolved. The parameters are the same as in the previous hook, except that the last three are guaranteed to be correct.
 
+.. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+
+   This optional function is called when the CPU performs a context switch (see ``--context-switch-log``).
+   Modules may save per-thread state keyed by ``old_thread_id`` and restore state for ``new_thread_id`` if present.
+
 -----------------------------------
 Branch Target Buffers
 -----------------------------------
@@ -126,6 +131,10 @@ A BTB module may implement three functions.
      * ``BRANCH_INDIRECT_CALL``: A call to a procedure whose target is stored in a register
      * ``BRANCH_RETURN``: A return to a calling procedure
      * ``BRANCH_OTHER``: If the branch type cannot be determined
+
+.. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+
+   Optional context-switch hook; see branch predictors.
 
 -----------------------------------
 Memory Prefetchers
@@ -214,6 +223,10 @@ A prefetcher module may implement five or six functions.
      * ``BRANCH_OTHER``: If the branch type cannot be determined
 
    :param branch_target: The instruction pointer of the target
+
+.. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+
+   Optional context-switch hook; see branch predictors. Invoked for caches with ``"context_switch_aware": true``.
 
 -----------------------------------
 Replacement Policies
@@ -310,4 +323,8 @@ A replacement policy module may implement five functions.
 .. cpp:function:: void replacement_final_stats()
 
    This function is called at the end of the simulation and can be used to print statistics.
+
+.. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+
+   Optional context-switch hook; see branch predictors. Invoked for caches with ``"context_switch_aware": true``.
 

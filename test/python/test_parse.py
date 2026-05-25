@@ -707,6 +707,25 @@ class FoundMoreContext:
     def find_all(self):
         return [{'name': 'extra', 'fname': 'aaaabbbb/extra'}]
 
+class ContextSwitchAwareLLCTests(unittest.TestCase):
+    def test_llc_context_switch_aware_rejected_for_multicore(self):
+        test_config = config.parse.NormalizedConfiguration({
+            'num_cores': 2,
+            'ooo_cpu': [{'name': 'cpu0'}, {'name': 'cpu1'}],
+            'LLC': {'context_switch_aware': True}
+        })
+        with self.assertRaises(ValueError):
+            test_config.apply_defaults_in(PassthroughContext(), PassthroughContext(), PassthroughContext(), PassthroughContext())
+
+    def test_llc_context_switch_aware_allowed_for_single_core(self):
+        test_config = config.parse.NormalizedConfiguration({
+            'ooo_cpu': [{'name': 'cpu0'}],
+            'LLC': {'context_switch_aware': True}
+        })
+        result = test_config.apply_defaults_in(PassthroughContext(), PassthroughContext(), PassthroughContext(), PassthroughContext())
+        llc = next(c for c in result[0]['caches'] if c['name'] == 'LLC')
+        self.assertTrue(llc.get('context_switch_aware'))
+
 class PathEndInTests(unittest.TestCase):
     def test_path_end(self):
         for length in (1,2,4,16):

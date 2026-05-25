@@ -62,6 +62,12 @@ struct branch_predictor : public bound_to<O3_CPU> {
   static auto predict_branch_member_impl(long) -> std::false_type;
 
   template <typename T, typename... Args>
+  static auto context_switch_member_impl(int)
+      -> decltype(std::declval<T>().on_context_switch(std::declval<Args>()...), std::true_type{});
+  template <typename, typename...>
+  static auto context_switch_member_impl(long) -> std::false_type;
+
+  template <typename T, typename... Args>
   constexpr static bool has_initialize = decltype(initialize_member_impl<T, Args...>(0))::value;
 
   template <typename T, typename... Args>
@@ -69,6 +75,9 @@ struct branch_predictor : public bound_to<O3_CPU> {
 
   template <typename T, typename... Args>
   constexpr static bool has_predict_branch = decltype(predict_branch_member_impl<T, Args...>(0))::value;
+
+  template <typename T, typename... Args>
+  constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
 };
 
 struct btb : public bound_to<O3_CPU> {
@@ -90,6 +99,12 @@ struct btb : public bound_to<O3_CPU> {
   static auto predict_branch_member_impl(long) -> std::false_type;
 
   template <typename T, typename... Args>
+  static auto context_switch_member_impl(int)
+      -> decltype(std::declval<T>().on_context_switch(std::declval<Args>()...), std::true_type{});
+  template <typename, typename...>
+  static auto context_switch_member_impl(long) -> std::false_type;
+
+  template <typename T, typename... Args>
   constexpr static bool has_initialize = decltype(initialize_member_impl<T, Args...>(0))::value;
 
   template <typename T, typename... Args>
@@ -97,6 +112,9 @@ struct btb : public bound_to<O3_CPU> {
 
   template <typename T, typename... Args>
   constexpr static bool has_btb_prediction = decltype(predict_branch_member_impl<T, Args...>(0))::value;
+
+  template <typename T, typename... Args>
+  constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
 };
 
 struct prefetcher : public bound_to<CACHE> {
@@ -136,6 +154,12 @@ struct prefetcher : public bound_to<CACHE> {
   static auto branch_operate_member_impl(long) -> std::false_type;
 
   template <typename T, typename... Args>
+  static auto context_switch_member_impl(int)
+      -> decltype(std::declval<T>().on_context_switch(std::declval<Args>()...), std::true_type{});
+  template <typename, typename...>
+  static auto context_switch_member_impl(long) -> std::false_type;
+
+  template <typename T, typename... Args>
   constexpr static bool has_initialize = decltype(initiailize_memory_impl<T, Args...>(0))::value;
 
   template <typename T, typename... Args>
@@ -152,6 +176,9 @@ struct prefetcher : public bound_to<CACHE> {
 
   template <typename T, typename... Args>
   constexpr static bool has_branch_operate = decltype(branch_operate_member_impl<T, Args...>(0))::value;
+
+  template <typename T, typename... Args>
+  constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
 };
 
 struct replacement : public bound_to<CACHE> {
@@ -188,6 +215,12 @@ struct replacement : public bound_to<CACHE> {
   static auto final_stats_member_impl(long) -> std::false_type;
 
   template <typename T, typename... Args>
+  static auto context_switch_member_impl(int)
+      -> decltype(std::declval<T>().on_context_switch(std::declval<Args>()...), std::true_type{});
+  template <typename, typename...>
+  static auto context_switch_member_impl(long) -> std::false_type;
+
+  template <typename T, typename... Args>
   constexpr static bool has_initialize = decltype(initialize_member_impl<T, Args...>(0))::value;
 
   template <typename T, typename... Args>
@@ -201,6 +234,9 @@ struct replacement : public bound_to<CACHE> {
 
   template <typename T, typename... Args>
   constexpr static bool has_final_stats = decltype(final_stats_member_impl<T, Args...>(0))::value;
+
+  template <typename T, typename... Args>
+  constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
 };
 } // namespace champsim::modules
 

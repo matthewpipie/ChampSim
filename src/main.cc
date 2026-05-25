@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <fstream>
 #include <numeric>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <CLI/CLI.hpp>
@@ -24,6 +25,7 @@
 
 #include "cache.h" // for CACHE
 #include "champsim.h"
+#include "context_switch_schedule.h"
 #ifndef CHAMPSIM_TEST_BUILD
 #include "core_inst.inc"
 #endif
@@ -86,6 +88,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   long long warmup_instructions = 0;
   long long simulation_instructions = std::numeric_limits<long long>::max();
   std::string json_file_name;
+  std::string context_switch_log_path;
+  std::vector<int> match_core_ids;
   std::vector<std::string> requested_listeners;
   std::vector<std::string> trace_names;
 
@@ -113,6 +117,12 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   app.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
+  auto* context_switch_log_option =
+      app.add_option("--context-switch-log", context_switch_log_path, "Conversion log with context switch events")->check(CLI::ExistingFile);
+  auto* match_core_id_option = app.add_option("--match-core-id", match_core_ids, "Comma-separated log core IDs, one per ChampSim CPU")
+                                     ->delimiter(',')
+                                     ->expected(NUM_CPUS);
+
   app.add_option("traces", trace_names, "The paths to the traces")->required()->expected(NUM_CPUS)->check(CLI::ExistingFile);
 
   CLI11_PARSE(app, argc, argv);
@@ -135,6 +145,28 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     // Warmup is 20% by default
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,readability-magic-numbers)
     warmup_instructions = simulation_instructions / 5;
+  }
+
+  const bool context_switch_log_given = context_switch_log_option->count() > 0;
+  const bool match_core_id_given = match_core_id_option->count() > 0;
+
+  if (context_switch_log_given != match_core_id_given) {
+    throw std::runtime_error{"--context-switch-log and --match-core-id must be specified together"};
+  }
+
+  if (match_core_id_given && match_core_ids.size() != NUM_CPUS) {
+    throw std::runtime_error{"--match-core-id must specify exactly " + std::to_string(NUM_CPUS) + " core IDs"};
+  }
+
+  std::vector<context_switch_schedule> context_switch_schedules;
+  if (context_switch_log_given) {
+    context_switch_schedules.reserve(NUM_CPUS);
+    for (std::size_t cpu_idx = 0; cpu_idx < NUM_CPUS; ++cpu_idx) {
+      context_switch_schedules.push_back(context_switch_schedule::parse_file(context_switch_log_path, match_core_ids.at(cpu_idx)));
+    }
+    for (std::size_t cpu_idx = 0; cpu_idx < NUM_CPUS; ++cpu_idx) {
+      gen_environment.cpu_view().at(cpu_idx).get().context_switch_sched = &context_switch_schedules.at(cpu_idx);
+    }
   }
 
   std::vector<champsim::tracereader> traces;

@@ -26,6 +26,7 @@
 
 #include "cache.h"
 #include "champsim.h"
+#include "context_switch_schedule.h"
 #include "deadlock.h"
 #include "environment.h"
 #include "event_listeners.h"
@@ -60,6 +61,13 @@ long O3_CPU::operate()
 {
   long progress{0};
   progress += add_progress(retire_rob(), RetireROB);                    // retire
+
+  if (context_switch_sched != nullptr) {
+    while (auto new_thread_id = context_switch_sched->check_and_advance(num_retired)) {
+      handle_context_switch(*new_thread_id);
+    }
+  }
+
   progress += add_progress(complete_inflight_instruction(), CompleteInflightInstruction); // finalize execution
   progress += add_progress(execute_instruction(), ExecuteInstruction);           // execute instructions
   progress += add_progress(schedule_instruction(), ScheduleInstruction);          // schedule instructions
@@ -846,6 +854,28 @@ void O3_CPU::impl_last_branch_result(champsim::address ip, champsim::address tar
 bool O3_CPU::impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) const
 {
   return branch_module_pimpl->impl_predict_branch(ip, predicted_target, always_taken, branch_type, cheating_branch_taken);
+}
+
+void O3_CPU::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) const
+{
+  branch_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
+  btb_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
+}
+
+void O3_CPU::handle_context_switch(uint64_t new_thread_id)
+{
+  const uint64_t old_thread_id = current_thread_id;
+  current_thread_id = new_thread_id;
+  impl_context_switch(old_thread_id, new_thread_id);
+
+  if (champsim::g_env != nullptr) {
+    for (auto cache_ref : champsim::g_env->cache_view()) {
+      CACHE& cache = cache_ref.get();
+      if (cache.context_switch_aware && cache.cpu == cpu) {
+        cache.handle_context_switch(old_thread_id, new_thread_id);
+      }
+    }
+  }
 }
 
 void O3_CPU::impl_initialize_btb() const { btb_module_pimpl->impl_initialize_btb(); }
