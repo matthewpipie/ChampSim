@@ -69,6 +69,38 @@ class GoogleSuite:
         else:
             return f"results_googleV2_1/{executable_name}"
 
+class GoogleSuiteCS:
+    BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_champsim_500Minstr_withtid/")
+    WARMUP = 50_000_000
+    SIMTIME = 500_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
+    def __init__(self):
+        pass
+    def get_workloads(self):
+        return sorted(map(lambda x: x.name, self.BASE_DIR.glob("*")))
+    def get_traces_and_weights_in_workload(self, workload):
+        traces = sorted((self.BASE_DIR / workload).glob("*.gz"), key = lambda x:
+            int(x.name.split("_")[1].split(".")[0]))
+        return list(map(lambda ix: [ix[1], 1.0 / len(traces), self.WARMUP, self.SIMTIME, ["--context-switch-log", str((self.BASE_DIR / workload / f"{workload}.log").absolute()), "--match-core-id", f"{ix[0]}"]], enumerate(traces)))
+    def name(self):
+        return "googleV2CS"
+
+class GoogleSuiteCS2:
+    BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_champsim_500Minstr_withtid_sharing/")
+    WARMUP = 50_000_000
+    SIMTIME = 500_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr)
+    def __init__(self):
+        pass
+    def get_workloads(self):
+        return sorted(map(lambda x: x.name, self.BASE_DIR.glob("*")))
+    def get_traces_and_weights_in_workload(self, workload):
+        traces = sorted((self.BASE_DIR / workload).glob("*.gz"), key = lambda x:
+            int(x.name.split("_")[1].split(".")[0]))
+        return list(map(lambda ix: [ix[1], 1.0 / len(traces), self.WARMUP, self.SIMTIME, ["--context-switch-log", str((self.BASE_DIR / workload / f"{workload}.log").absolute()), "--match-core-id", f"{ix[0]}"]], enumerate(traces)))
+    def name(self):
+        return "googleV2CS2"
+
 class GooglePerThreadSuite:
     BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_champsim_perthread_1.5Binstr/")
     WARMUP = 50_000_000
@@ -365,7 +397,7 @@ class LigraSuite:
         return "ligra"
 
 
-SUITES = [SpecSuite(), GoogleSuite(), GooglePerThreadSuite(), GooglePerThreadLenSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
+SUITES = [SpecSuite(), GoogleSuite(), GoogleSuiteCS(), GoogleSuiteCS2(), GooglePerThreadSuite(), GooglePerThreadLenSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
 SUITE_MAP = {x.name(): x for x in SUITES}
 
 if __name__ == "__main__":

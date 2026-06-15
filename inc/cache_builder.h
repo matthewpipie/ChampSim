@@ -58,6 +58,8 @@ struct cache_builder_base {
   bool m_wq_full_addr{};
   bool m_va_pref{};
   bool m_context_switch_aware{};
+  bool m_thread_switch_auto_save_prefetcher{};
+  bool m_thread_switch_auto_save_replacement{};
 
   std::vector<access_type> m_pref_act_mask{access_type::LOAD, access_type::PREFETCH};
   std::vector<champsim::channel*> m_uls{};
@@ -222,6 +224,20 @@ public:
    * Disable context-switch awareness for this cache.
    */
   self_type& reset_context_switch_aware();
+
+  /**
+   * Swap entire prefetcher module state on context switch (see ``thread_switch_auto_save_prefetcher`` in config).
+   */
+  self_type& set_thread_switch_auto_save_prefetcher();
+
+  self_type& reset_thread_switch_auto_save_prefetcher();
+
+  /**
+   * Swap entire replacement module state on context switch (see ``thread_switch_auto_save_replacement`` in config).
+   */
+  self_type& set_thread_switch_auto_save_replacement();
+
+  self_type& reset_thread_switch_auto_save_replacement();
 
   /**
    * Specify the ``access_type`` values that should activate the prefetcher.
@@ -507,6 +523,34 @@ template <typename P, typename R>
 auto champsim::cache_builder<P, R>::reset_context_switch_aware() -> self_type&
 {
   m_context_switch_aware = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_thread_switch_auto_save_prefetcher() -> self_type&
+{
+  m_thread_switch_auto_save_prefetcher = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::reset_thread_switch_auto_save_prefetcher() -> self_type&
+{
+  m_thread_switch_auto_save_prefetcher = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_thread_switch_auto_save_replacement() -> self_type&
+{
+  m_thread_switch_auto_save_replacement = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::reset_thread_switch_auto_save_replacement() -> self_type&
+{
+  m_thread_switch_auto_save_replacement = false;
   return *this;
 }
 

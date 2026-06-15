@@ -13,6 +13,9 @@ if len(sys.argv) != 4 and len(sys.argv) != 5:
     sys.exit(1)
 
 executable = Path(sys.argv[1])
+if not executable.exists():
+    print("Executable doesn't exist")
+    sys.exit(1)
 suite_name = sys.argv[2]
 study_mode = int(sys.argv[3]) # 0 = off, 1 = yes, 2 = 100M all (no warm)
 filt = sys.argv[4] if len(sys.argv) > 4 else None
@@ -84,7 +87,7 @@ for suite in suites:
             name_p = f"{workload},{i:03},{N_CORES_PER_PROCESS},{i*N_CORES_PER_PROCESS:03},{warmup},{simtime}"
             outname = f"{name_p}.raw"
             #jobname = f"{suite_name}---{study_mode}---{executable_name}---{name_p}.job"[:255]
-            s = 's' if study_mode else 'y' if "google" in suite_name else 'z'
+            s = 's' if study_mode == 1 else 's2' if study_mode == 2 else 'y' if "google" in suite_name else 'z'
             jobname = f"{s}---{executable_name}---{suite_name}---{name_p}.job"[:255]
             outfile = Path(OUT_DIR) / outname
 

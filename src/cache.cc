@@ -41,8 +41,10 @@ CACHE::CACHE(CACHE&& other)
       cpu(other.cpu), NAME(std::move(other.NAME)), NUM_SET(other.NUM_SET), NUM_WAY(other.NUM_WAY), MSHR_SIZE(other.MSHR_SIZE), PQ_SIZE(other.PQ_SIZE),
       HIT_LATENCY(other.HIT_LATENCY), FILL_LATENCY(other.FILL_LATENCY), OFFSET_BITS(other.OFFSET_BITS), block(std::move(other.block)), MAX_TAG(other.MAX_TAG),
       MAX_FILL(other.MAX_FILL), prefetch_as_load(other.prefetch_as_load), match_offset_bits(other.match_offset_bits), virtual_prefetch(other.virtual_prefetch),
-      context_switch_aware(other.context_switch_aware), thread_snapshots_(std::move(other.thread_snapshots_)),
-      pref_activate_mask(std::move(other.pref_activate_mask)),
+      context_switch_aware(other.context_switch_aware), thread_switch_auto_save_prefetcher(other.thread_switch_auto_save_prefetcher),
+      thread_switch_auto_save_replacement(other.thread_switch_auto_save_replacement), thread_snapshots_(std::move(other.thread_snapshots_)),
+      thread_pref_module_snapshots_(std::move(other.thread_pref_module_snapshots_)),
+      thread_repl_module_snapshots_(std::move(other.thread_repl_module_snapshots_)), pref_activate_mask(std::move(other.pref_activate_mask)),
 
       sim_stats(std::move(other.sim_stats)), roi_stats(std::move(other.roi_stats)),
 
@@ -81,7 +83,11 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   this->match_offset_bits = other.match_offset_bits;
   this->virtual_prefetch = other.virtual_prefetch;
   this->context_switch_aware = other.context_switch_aware;
+  this->thread_switch_auto_save_prefetcher = other.thread_switch_auto_save_prefetcher;
+  this->thread_switch_auto_save_replacement = other.thread_switch_auto_save_replacement;
   this->thread_snapshots_ = std::move(other.thread_snapshots_);
+  this->thread_pref_module_snapshots_ = std::move(other.thread_pref_module_snapshots_);
+  this->thread_repl_module_snapshots_ = std::move(other.thread_repl_module_snapshots_);
   this->pref_activate_mask = std::move(other.pref_activate_mask);
 
   this->sim_stats = std::move(other.sim_stats);
@@ -881,24 +887,81 @@ void CACHE::impl_replacement_cache_fill(uint32_t triggering_cpu, long set, long 
 
 void CACHE::impl_replacement_final_stats() const { repl_module_pimpl->impl_replacement_final_stats(); }
 
-void CACHE::handle_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+void CACHE::auto_save_restore_prefetcher_module(uint64_t old_thread_id, uint64_t new_thread_id)
+{
+  thread_pref_module_snapshots_[old_thread_id] = std::move(pref_module_pimpl);
+
+  if (auto saved_it = thread_pref_module_snapshots_.find(new_thread_id);
+      saved_it != thread_pref_module_snapshots_.end() && saved_it->second != nullptr) {
+    pref_module_pimpl = std::move(saved_it->second);
+  } else {
+    pref_module_pimpl = thread_pref_module_snapshots_.at(old_thread_id)->create_fresh_instance(this);
+  }
+
+  pref_module_pimpl->bind(this);
+}
+
+void CACHE::auto_save_restore_replacement_module(uint64_t old_thread_id, uint64_t new_thread_id)
+{
+  thread_repl_module_snapshots_[old_thread_id] = std::move(repl_module_pimpl);
+
+  if (auto saved_it = thread_repl_module_snapshots_.find(new_thread_id);
+      saved_it != thread_repl_module_snapshots_.end() && saved_it->second != nullptr) {
+    repl_module_pimpl = std::move(saved_it->second);
+  } else {
+    repl_module_pimpl = thread_repl_module_snapshots_.at(old_thread_id)->create_fresh_instance(this);
+  }
+
+  repl_module_pimpl->bind(this);
+}
+
+void CACHE::handle_context_switch(const context_switch_dispatch& dispatch)
 {
   if (!context_switch_aware) {
     return;
   }
+
+
+  const uint64_t old_len = dispatch.old_context_length;
+  const uint64_t new_len = dispatch.new_context_length;
+
+  const uint64_t SHORT_ORD = (uint64_t)((int64_t)(-10));
+  //const uint64_t THREAD_BACKUP_THRESHOLD = 100'000'000;
+  const uint64_t THREAD_BACKUP_THRESHOLD = 0;
+  bool save = old_len >= THREAD_BACKUP_THRESHOLD;
+  bool restore = new_len >= THREAD_BACKUP_THRESHOLD;
+
+  const uint64_t old_thread_id = save ? dispatch.old_thread_id : SHORT_ORD;
+  const uint64_t new_thread_id = restore ? dispatch.new_thread_id : SHORT_ORD;
+
+  if (old_thread_id == new_thread_id) return;
 
   thread_snapshots_[old_thread_id] = block;
   if (auto snapshot_it = thread_snapshots_.find(new_thread_id); snapshot_it != thread_snapshots_.end()) {
     block = snapshot_it->second;
   }
 
-  impl_context_switch(old_thread_id, new_thread_id);
+  if (thread_switch_auto_save_prefetcher) {
+    auto_save_restore_prefetcher_module(old_thread_id, new_thread_id);
+  } else {
+    pref_module_pimpl->impl_context_switch(dispatch);
+  }
+
+  if (thread_switch_auto_save_replacement) {
+    auto_save_restore_replacement_module(old_thread_id, new_thread_id);
+  } else {
+    repl_module_pimpl->impl_context_switch(dispatch);
+  }
 }
 
-void CACHE::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) const
+void CACHE::impl_context_switch(const context_switch_dispatch& dispatch) const
 {
-  pref_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
-  repl_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
+  if (!thread_switch_auto_save_prefetcher) {
+    pref_module_pimpl->impl_context_switch(dispatch);
+  }
+  if (!thread_switch_auto_save_replacement) {
+    repl_module_pimpl->impl_context_switch(dispatch);
+  }
 }
 
 void CACHE::initialize()

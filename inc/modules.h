@@ -78,6 +78,9 @@ struct branch_predictor : public bound_to<O3_CPU> {
 
   template <typename T, typename... Args>
   constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
+
+  template <typename T>
+  constexpr static bool has_context_switch_lengths = decltype(context_switch_member_impl<T, uint64_t, uint64_t, uint64_t, uint64_t>(0))::value;
 };
 
 struct btb : public bound_to<O3_CPU> {
@@ -115,6 +118,9 @@ struct btb : public bound_to<O3_CPU> {
 
   template <typename T, typename... Args>
   constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
+
+  template <typename T>
+  constexpr static bool has_context_switch_lengths = decltype(context_switch_member_impl<T, uint64_t, uint64_t, uint64_t, uint64_t>(0))::value;
 };
 
 struct prefetcher : public bound_to<CACHE> {
@@ -179,6 +185,9 @@ struct prefetcher : public bound_to<CACHE> {
 
   template <typename T, typename... Args>
   constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
+
+  template <typename T>
+  constexpr static bool has_context_switch_lengths = decltype(context_switch_member_impl<T, uint64_t, uint64_t, uint64_t, uint64_t>(0))::value;
 };
 
 struct replacement : public bound_to<CACHE> {
@@ -237,6 +246,9 @@ struct replacement : public bound_to<CACHE> {
 
   template <typename T, typename... Args>
   constexpr static bool has_context_switch = decltype(context_switch_member_impl<T, Args...>(0))::value;
+
+  template <typename T>
+  constexpr static bool has_context_switch_lengths = decltype(context_switch_member_impl<T, uint64_t, uint64_t, uint64_t, uint64_t>(0))::value;
 };
 } // namespace champsim::modules
 

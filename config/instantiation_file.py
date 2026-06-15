@@ -126,10 +126,18 @@ def get_cpu_builder(cpu, caches, ul_pairs):
     if 'frequency' in cpu:
         local_params['^clock_period'] = int(1000000/cpu['frequency'])
 
+    local_core_builder_parts = {
+        ('thread_switch_auto_save_bp', True): '.set_thread_switch_auto_save_bp()',
+        ('thread_switch_auto_save_bp', False): '.reset_thread_switch_auto_save_bp()',
+        ('thread_switch_auto_save_btb', True): '.set_thread_switch_auto_save_btb()',
+        ('thread_switch_auto_save_btb', False): '.reset_thread_switch_auto_save_btb()',
+    }
+
     builder_parts = itertools.chain(util.multiline(itertools.chain(
         ('champsim::core_builder{{ champsim::defaults::default_core }}',),
         required_parts,
         *(util.wrap_list(v) for k,v in core_builder_parts.items() if k in cpu),
+        (v for k,v in local_core_builder_parts.items() if k[0] in cpu and k[1] == cpu[k[0]]),
         (v for k,v in dib_builder_parts.items() if k in cpu.get('DIB',{}))
     ), indent=1, line_end=''))
     yield from (part.format(**cpu, **local_params) for part in builder_parts)
@@ -151,7 +159,11 @@ def get_cache_builder(elem, ul_pairs):
         ('virtual_prefetch', True): '.set_virtual_prefetch()',
         ('virtual_prefetch', False): '.reset_virtual_prefetch()',
         ('context_switch_aware', True): '.set_context_switch_aware()',
-        ('context_switch_aware', False): '.reset_context_switch_aware()'
+        ('context_switch_aware', False): '.reset_context_switch_aware()',
+        ('thread_switch_auto_save_prefetcher', True): '.set_thread_switch_auto_save_prefetcher()',
+        ('thread_switch_auto_save_prefetcher', False): '.reset_thread_switch_auto_save_prefetcher()',
+        ('thread_switch_auto_save_replacement', True): '.set_thread_switch_auto_save_replacement()',
+        ('thread_switch_auto_save_replacement', False): '.reset_thread_switch_auto_save_replacement()'
     }
 
     uppers = (v for v in ul_pairs if v[0] == elem.get('name'))

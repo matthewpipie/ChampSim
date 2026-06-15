@@ -29,16 +29,30 @@ struct context_switch_event {
   uint64_t thread_id{};
 };
 
+struct context_switch_boundary {
+  uint64_t new_thread_id{};
+  uint64_t old_context_length{};
+  uint64_t new_context_length{};
+};
+
+struct context_switch_dispatch {
+  uint64_t old_thread_id{};
+  uint64_t new_thread_id{};
+  uint64_t old_context_length{};
+  uint64_t new_context_length{};
+};
+
 class context_switch_schedule
 {
   std::vector<context_switch_event> events_;
   std::size_t next_index_{0};
+  uint64_t last_switch_instruction_number_{0};
 
 public:
   static context_switch_schedule parse_file(const std::filesystem::path& path, int log_core_id);
   static context_switch_schedule parse_lines(std::string_view text, int log_core_id);
 
-  std::optional<uint64_t> check_and_advance(uint64_t num_retired);
+  std::optional<context_switch_boundary> check_and_advance(uint64_t num_retired);
 };
 
 #endif

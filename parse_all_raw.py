@@ -644,4 +644,5 @@ if __name__ == "__main__":
                 print(suite_workload_weights)
         output = OUT_DIR / (suite_name + ".json")
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(round_floats(res), indent=2))
+        if len(res) != 0:
+            output.write_text(json.dumps(round_floats(res), indent=2))

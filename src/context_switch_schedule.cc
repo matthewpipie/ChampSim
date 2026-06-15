@@ -90,7 +90,7 @@ context_switch_schedule context_switch_schedule::parse_lines(std::string_view te
   return sched;
 }
 
-std::optional<uint64_t> context_switch_schedule::check_and_advance(uint64_t num_retired)
+std::optional<context_switch_boundary> context_switch_schedule::check_and_advance(uint64_t num_retired)
 {
   if (next_index_ >= events_.size()) {
     return std::nullopt;
@@ -100,7 +100,16 @@ std::optional<uint64_t> context_switch_schedule::check_and_advance(uint64_t num_
     return std::nullopt;
   }
 
-  const uint64_t new_thread_id = events_[next_index_].thread_id;
+  const std::size_t current_index = next_index_;
+  const uint64_t switch_instruction = events_[current_index].instruction_number;
+  const uint64_t new_thread_id = events_[current_index].thread_id;
+
+  const uint64_t old_context_length = switch_instruction - last_switch_instruction_number_;
+  const uint64_t new_context_length =
+      (current_index + 1 < events_.size()) ? events_[current_index + 1].instruction_number - switch_instruction : 0;
+
+  last_switch_instruction_number_ = switch_instruction;
   ++next_index_;
-  return new_thread_id;
+
+  return context_switch_boundary{new_thread_id, old_context_length, new_context_length};
 }

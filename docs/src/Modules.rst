@@ -79,9 +79,19 @@ A branch predictor module may implement three functions.
    This function is called when a branch is resolved. The parameters are the same as in the previous hook, except that the last three are guaranteed to be correct.
 
 .. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+.. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id, uint64_t old_context_length, uint64_t new_context_length)
 
-   This optional function is called when the CPU performs a context switch (see ``--context-switch-log``).
-   Modules may save per-thread state keyed by ``old_thread_id`` and restore state for ``new_thread_id`` if present.
+   This optional function is called when the CPU performs a context switch (see ``--context-switch-log``),
+   unless automatic module swapping is enabled in the configuration for that component.
+
+   ``old_context_length`` is the number of retired instructions since the previous context switch (or since simulation start for the first switch).
+   ``new_context_length`` is the number of retired instructions until the next scheduled switch; it is ``0`` when no further switch is scheduled for this core.
+
+   For cores, set ``thread_switch_auto_save_bp`` and/or ``thread_switch_auto_save_btb`` in ``champsim_config.json``.
+   For caches, set ``thread_switch_auto_save_prefetcher`` and/or ``thread_switch_auto_save_replacement`` on the cache object.
+   When auto-save is enabled for a component, the simulator swaps entire module instances and this hook is not used for that component.
+
+   Implement either the two-argument or four-argument form; if both are present, the four-argument form is preferred.
 
 -----------------------------------
 Branch Target Buffers
@@ -226,7 +236,7 @@ A prefetcher module may implement five or six functions.
 
 .. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
 
-   Optional context-switch hook; see branch predictors. Invoked for caches with ``"context_switch_aware": true``.
+   Optional context-switch hook; see branch predictors. Used when ``thread_switch_auto_save_prefetcher`` is not enabled on the cache.
 
 -----------------------------------
 Replacement Policies
@@ -326,5 +336,5 @@ A replacement policy module may implement five functions.
 
 .. cpp:function:: void on_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
 
-   Optional context-switch hook; see branch predictors. Invoked for caches with ``"context_switch_aware": true``.
+   Optional context-switch hook; see branch predictors. Used when ``thread_switch_auto_save_prefetcher`` is not enabled on the cache.
 

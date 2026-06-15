@@ -119,6 +119,22 @@ def int_or_prefixed_size(val):
         return int(val)
     return val
 
+THREAD_SWITCH_KEY_ALIASES = {
+    'thread-switch-auto-save-bp': 'thread_switch_auto_save_bp',
+    'thread-switch-auto-save-btb': 'thread_switch_auto_save_btb',
+    'thread-switch-auto-save-prefetcher': 'thread_switch_auto_save_prefetcher',
+    'thread-switch-auto-save-replacement': 'thread_switch_auto_save_replacement',
+}
+
+def normalize_thread_switch_keys(elem):
+    '''Accept hyphenated config keys as aliases for underscore names.'''
+    if not isinstance(elem, dict):
+        return elem
+    for alias, key in THREAD_SWITCH_KEY_ALIASES.items():
+        if alias in elem and key not in elem:
+            elem[key] = elem[alias]
+    return elem
+
 def core_default_names(cpu):
     """ Apply defaults to a cpu with the given index """
     default_element_names = {n: f'{cpu["name"]}_{n}' for n in ('L1I', 'L1D', 'ITLB', 'DTLB', 'L2C', 'STLB', 'PTW')}
@@ -225,6 +241,12 @@ class NormalizedConfiguration:
 
     def __init__(self, config_file, verbose=False):
         ''' Normalize a JSON configuration in preparation for parsing '''
+        normalize_thread_switch_keys(config_file)
+        for cache in config_file.get('caches', []):
+            normalize_thread_switch_keys(cache)
+        if 'LLC' in config_file:
+            normalize_thread_switch_keys(config_file['LLC'])
+
         # Copy or trim cores as necessary to fill out the specified number of cores
         self.cores = duplicate_to_length(config_file.get('ooo_cpu', [{}]), config_file.get('num_cores', 1))
 
@@ -234,7 +256,8 @@ class NormalizedConfiguration:
                 'frequency', 'ifetch_buffer_size', 'decode_buffer_size', 'dispatch_buffer_size', 'register_file_size', 'rob_size', 'lq_size',
                 'sq_size', 'fetch_width', 'decode_width', 'dispatch_width', 'execute_width', 'lq_width', 'sq_width',
                 'retire_width', 'mispredict_penalty', 'scheduler_size', 'decode_latency', 'dispatch_latency',
-                'schedule_latency', 'execute_latency', 'branch_predictor', 'btb', 'DIB'
+                'schedule_latency', 'execute_latency', 'branch_predictor', 'btb', 'DIB',
+                'thread_switch_auto_save_bp', 'thread_switch_auto_save_btb'
             )
         )
         self.cores = [util.chain(cpu, core_from_config, {'name': f'cpu{i}'}) for i,cpu in enumerate(self.cores)]

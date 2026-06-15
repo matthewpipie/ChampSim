@@ -74,6 +74,14 @@ class CpuBuilderTest(unittest.TestCase):
     def test_mispredict_penalty(self):
         self.get_element_diff(['.mispredict_penalty(1)'], mispredict_penalty=1)
 
+    def test_thread_switch_auto_save_bp(self):
+        self.get_element_diff(['.set_thread_switch_auto_save_bp()'], thread_switch_auto_save_bp=True)
+        self.get_element_diff(['.reset_thread_switch_auto_save_bp()'], thread_switch_auto_save_bp=False)
+
+    def test_thread_switch_auto_save_btb(self):
+        self.get_element_diff(['.set_thread_switch_auto_save_btb()'], thread_switch_auto_save_btb=True)
+        self.get_element_diff(['.reset_thread_switch_auto_save_btb()'], thread_switch_auto_save_btb=False)
+
     def test_decode_latency(self):
         self.get_element_diff(['.decode_latency(1)'], decode_latency=1)
 
@@ -175,6 +183,14 @@ class CacheBuilderTests(unittest.TestCase):
     def test_context_switch_aware(self):
         self.get_element_diff(['.set_context_switch_aware()'], context_switch_aware=True)
         self.get_element_diff(['.reset_context_switch_aware()'], context_switch_aware=False)
+
+    def test_thread_switch_auto_save_prefetcher(self):
+        self.get_element_diff(['.set_thread_switch_auto_save_prefetcher()'], thread_switch_auto_save_prefetcher=True)
+        self.get_element_diff(['.reset_thread_switch_auto_save_prefetcher()'], thread_switch_auto_save_prefetcher=False)
+
+    def test_thread_switch_auto_save_replacement(self):
+        self.get_element_diff(['.set_thread_switch_auto_save_replacement()'], thread_switch_auto_save_replacement=True)
+        self.get_element_diff(['.reset_thread_switch_auto_save_replacement()'], thread_switch_auto_save_replacement=False)
 
     def test_prefetch_activate(self):
         self.get_element_diff(['.prefetch_activate(access_type::LOAD)'], prefetch_activate=['LOAD'])

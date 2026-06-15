@@ -86,7 +86,7 @@ if __name__ == '__main__':
                     else:
                         #time.sleep(10)
                         pass
-            time.sleep(0.1)
+            time.sleep(.3)
             if get_mem_util() > 0.97:
                 print("ERROR: OOM! Quitting...")
                 pool.terminate()

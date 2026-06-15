@@ -20,14 +20,44 @@ Thread 0 processed 500 instructions
   auto sched1 = context_switch_schedule::parse_lines(log, 1);
 
   REQUIRE_FALSE(sched0.check_and_advance(99).has_value());
-  REQUIRE(sched0.check_and_advance(100) == std::optional<uint64_t>{111});
+  {
+    const auto boundary = sched0.check_and_advance(100);
+    REQUIRE(boundary.has_value());
+    REQUIRE(boundary->new_thread_id == 111);
+    REQUIRE(boundary->old_context_length == 100);
+    REQUIRE(boundary->new_context_length == 200);
+  }
   REQUIRE(sched0.check_and_advance(150) == std::nullopt);
-  REQUIRE(sched0.check_and_advance(300) == std::optional<uint64_t>{333});
-  REQUIRE(sched0.check_and_advance(400) == std::optional<uint64_t>{444});
-  REQUIRE(sched0.check_and_advance(500) == std::optional<uint64_t>{555});
+  {
+    const auto boundary = sched0.check_and_advance(300);
+    REQUIRE(boundary.has_value());
+    REQUIRE(boundary->new_thread_id == 333);
+    REQUIRE(boundary->old_context_length == 200);
+    REQUIRE(boundary->new_context_length == 100);
+  }
+  {
+    const auto boundary = sched0.check_and_advance(400);
+    REQUIRE(boundary.has_value());
+    REQUIRE(boundary->new_thread_id == 444);
+    REQUIRE(boundary->old_context_length == 100);
+    REQUIRE(boundary->new_context_length == 100);
+  }
+  {
+    const auto boundary = sched0.check_and_advance(500);
+    REQUIRE(boundary.has_value());
+    REQUIRE(boundary->new_thread_id == 555);
+    REQUIRE(boundary->old_context_length == 100);
+    REQUIRE(boundary->new_context_length == 0);
+  }
 
   REQUIRE_FALSE(sched1.check_and_advance(199).has_value());
-  REQUIRE(sched1.check_and_advance(200) == std::optional<uint64_t>{222});
+  {
+    const auto boundary = sched1.check_and_advance(200);
+    REQUIRE(boundary.has_value());
+    REQUIRE(boundary->new_thread_id == 222);
+    REQUIRE(boundary->old_context_length == 200);
+    REQUIRE(boundary->new_context_length == 0);
+  }
 }
 
 TEST_CASE("context_switch_schedule fires multiple switches in one cycle")
@@ -35,8 +65,20 @@ TEST_CASE("context_switch_schedule fires multiple switches in one cycle")
   const std::string log = "***0,10,1\n***0,20,2\n";
   auto sched = context_switch_schedule::parse_lines(log, 0);
 
-  REQUIRE(sched.check_and_advance(25) == std::optional<uint64_t>{1});
-  REQUIRE(sched.check_and_advance(25) == std::optional<uint64_t>{2});
+  {
+    const auto boundary = sched.check_and_advance(25);
+    REQUIRE(boundary.has_value());
+    REQUIRE(boundary->new_thread_id == 1);
+    REQUIRE(boundary->old_context_length == 10);
+    REQUIRE(boundary->new_context_length == 10);
+  }
+  {
+    const auto boundary = sched.check_and_advance(25);
+    REQUIRE(boundary.has_value());
+    REQUIRE(boundary->new_thread_id == 2);
+    REQUIRE(boundary->old_context_length == 10);
+    REQUIRE(boundary->new_context_length == 0);
+  }
   REQUIRE(sched.check_and_advance(25) == std::nullopt);
 }
 

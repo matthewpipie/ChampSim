@@ -73,6 +73,8 @@ struct core_builder_base {
   champsim::bandwidth::maximum_type m_l1d_bw{1};
   champsim::channel* m_fetch_queues{};
   champsim::channel* m_data_queues{};
+  bool m_thread_switch_auto_save_bp{};
+  bool m_thread_switch_auto_save_btb{};
 };
 } // namespace detail
 
@@ -254,6 +256,20 @@ public:
    * Specify the downstream queues to the data cache.
    */
   self_type& data_queues(champsim::channel* data_queues_);
+
+  /**
+   * Swap entire branch predictor module state on context switch (see ``thread_switch_auto_save_bp`` in config).
+   */
+  self_type& set_thread_switch_auto_save_bp();
+
+  self_type& reset_thread_switch_auto_save_bp();
+
+  /**
+   * Swap entire BTB module state on context switch (see ``thread_switch_auto_save_btb`` in config).
+   */
+  self_type& set_thread_switch_auto_save_btb();
+
+  self_type& reset_thread_switch_auto_save_btb();
 
   /**
    * Specify the branch direction predictor.
@@ -497,6 +513,34 @@ template <typename B, typename T>
 auto champsim::core_builder<B, T>::data_queues(champsim::channel* data_queues_) -> self_type&
 {
   m_data_queues = data_queues_;
+  return *this;
+}
+
+template <typename B, typename T>
+auto champsim::core_builder<B, T>::set_thread_switch_auto_save_bp() -> self_type&
+{
+  m_thread_switch_auto_save_bp = true;
+  return *this;
+}
+
+template <typename B, typename T>
+auto champsim::core_builder<B, T>::reset_thread_switch_auto_save_bp() -> self_type&
+{
+  m_thread_switch_auto_save_bp = false;
+  return *this;
+}
+
+template <typename B, typename T>
+auto champsim::core_builder<B, T>::set_thread_switch_auto_save_btb() -> self_type&
+{
+  m_thread_switch_auto_save_btb = true;
+  return *this;
+}
+
+template <typename B, typename T>
+auto champsim::core_builder<B, T>::reset_thread_switch_auto_save_btb() -> self_type&
+{
+  m_thread_switch_auto_save_btb = false;
   return *this;
 }
 

@@ -29,6 +29,7 @@
 #include <memory>
 #include <optional>
 #include <queue>
+#include <unordered_map>
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
@@ -47,6 +48,7 @@
 
 class CACHE;
 class context_switch_schedule;
+struct context_switch_dispatch;
 class CacheBus
 {
   using channel_type = champsim::channel;
@@ -99,6 +101,8 @@ public:
 
   uint64_t current_thread_id = 0;
   context_switch_schedule* context_switch_sched = nullptr;
+  bool thread_switch_auto_save_bp{};
+  bool thread_switch_auto_save_btb{};
 
   bool show_heartbeat = true;
 
@@ -193,7 +197,10 @@ public:
 
   void print_deadlock() final;
 
-  void handle_context_switch(uint64_t new_thread_id);
+  void handle_context_switch(const context_switch_dispatch& dispatch);
+
+  void auto_save_restore_branch_module(uint64_t old_thread_id, uint64_t new_thread_id);
+  void auto_save_restore_btb_module(uint64_t old_thread_id, uint64_t new_thread_id);
 
 #include "module_decl.inc"
 
@@ -203,7 +210,8 @@ public:
     virtual void impl_initialize_branch_predictor() = 0;
     virtual void impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) = 0;
     virtual bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) = 0;
-    virtual void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) = 0;
+    virtual void impl_context_switch(const context_switch_dispatch& dispatch) = 0;
+    virtual std::unique_ptr<branch_module_concept> create_fresh_instance(O3_CPU* cpu) const = 0;
   };
 
   struct btb_module_concept {
@@ -212,7 +220,8 @@ public:
     virtual void impl_initialize_btb() = 0;
     virtual void impl_update_btb(champsim::address ip, champsim::address predicted_target, bool taken, uint8_t branch_type) = 0;
     virtual std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type, champsim::address cheating_branch_target) = 0;
-    virtual void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) = 0;
+    virtual void impl_context_switch(const context_switch_dispatch& dispatch) = 0;
+    virtual std::unique_ptr<btb_module_concept> create_fresh_instance(O3_CPU* cpu) const = 0;
   };
 
   template <typename... Bs>
@@ -223,7 +232,8 @@ public:
     void impl_initialize_branch_predictor() final;
     void impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) final;
     [[nodiscard]] bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) final;
-    void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) final;
+    void impl_context_switch(const context_switch_dispatch& dispatch) final;
+    [[nodiscard]] std::unique_ptr<branch_module_concept> create_fresh_instance(O3_CPU* cpu) const final;
   };
 
   template <typename... Ts>
@@ -234,17 +244,20 @@ public:
     void impl_initialize_btb() final;
     void impl_update_btb(champsim::address ip, champsim::address predicted_target, bool taken, uint8_t branch_type) final;
     [[nodiscard]] std::pair<champsim::address, bool> impl_btb_prediction(champsim::address ip, uint8_t branch_type, champsim::address cheating_branch_target) final;
-    void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) final;
+    void impl_context_switch(const context_switch_dispatch& dispatch) final;
+    [[nodiscard]] std::unique_ptr<btb_module_concept> create_fresh_instance(O3_CPU* cpu) const final;
   };
 
   std::unique_ptr<branch_module_concept> branch_module_pimpl;
   std::unique_ptr<btb_module_concept> btb_module_pimpl;
+  std::unordered_map<uint64_t, std::unique_ptr<branch_module_concept>> thread_branch_module_snapshots_{};
+  std::unordered_map<uint64_t, std::unique_ptr<btb_module_concept>> thread_btb_module_snapshots_{};
 
   // NOLINTBEGIN(readability-make-member-function-const): legacy modules use non-const hooks
   void impl_initialize_branch_predictor() const;
   void impl_last_branch_result(champsim::address ip, champsim::address target, bool taken, uint8_t branch_type) const;
   [[nodiscard]] bool impl_predict_branch(champsim::address ip, champsim::address predicted_target, bool always_taken, uint8_t branch_type, bool cheating_branch_taken) const;
-  void impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) const;
+  void impl_context_switch(const context_switch_dispatch& dispatch) const;
 
   void impl_initialize_btb() const;
   void impl_update_btb(champsim::address ip, champsim::address predicted_target, bool taken, uint8_t branch_type) const;
@@ -263,7 +276,8 @@ public:
         DECODE_LATENCY(b.m_decode_latency * b.m_clock_period), SCHEDULING_LATENCY(b.m_schedule_latency * b.m_clock_period),
         EXEC_LATENCY(b.m_execute_latency * b.m_clock_period), DIB_HIT_LATENCY(b.m_dib_hit_latency * b.m_clock_period), L1I_BANDWIDTH(b.m_l1i_bw),
         L1D_BANDWIDTH(b.m_l1d_bw), IN_QUEUE_SIZE(2 * champsim::to_underlying(b.m_fetch_width)), L1I_bus(b.m_cpu, b.m_fetch_queues),
-        L1D_bus(b.m_cpu, b.m_data_queues), l1i(b.m_l1i), branch_module_pimpl(std::make_unique<branch_module_model<Bs...>>(this)),
+        L1D_bus(b.m_cpu, b.m_data_queues), l1i(b.m_l1i), thread_switch_auto_save_bp(b.m_thread_switch_auto_save_bp),
+        thread_switch_auto_save_btb(b.m_thread_switch_auto_save_btb), branch_module_pimpl(std::make_unique<branch_module_model<Bs...>>(this)),
         btb_module_pimpl(std::make_unique<btb_module_model<Ts...>>(this))
   {
   }
@@ -393,27 +407,47 @@ std::pair<champsim::address, bool> O3_CPU::btb_module_model<Ts...>::impl_btb_pre
 }
 
 template <typename... Bs>
-void O3_CPU::branch_module_model<Bs...>::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+void O3_CPU::branch_module_model<Bs...>::impl_context_switch(const context_switch_dispatch& dispatch)
 {
   [[maybe_unused]] auto process_one = [&](auto& b) {
     using namespace champsim::modules;
-    if constexpr (branch_predictor::has_context_switch<decltype(b)>)
-      b.on_context_switch(old_thread_id, new_thread_id);
+    if constexpr (branch_predictor::has_context_switch_lengths<decltype(b)>)
+      b.on_context_switch(dispatch.old_thread_id, dispatch.new_thread_id, dispatch.old_context_length, dispatch.new_context_length);
+    else if constexpr (branch_predictor::has_context_switch<decltype(b)>)
+      b.on_context_switch(dispatch.old_thread_id, dispatch.new_thread_id);
   };
 
   std::apply([&](auto&... b) { (..., process_one(b)); }, intern_);
 }
 
 template <typename... Ts>
-void O3_CPU::btb_module_model<Ts...>::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id)
+void O3_CPU::btb_module_model<Ts...>::impl_context_switch(const context_switch_dispatch& dispatch)
 {
   [[maybe_unused]] auto process_one = [&](auto& t) {
     using namespace champsim::modules;
-    if constexpr (btb::has_context_switch<decltype(t)>)
-      t.on_context_switch(old_thread_id, new_thread_id);
+    if constexpr (btb::has_context_switch_lengths<decltype(t)>)
+      t.on_context_switch(dispatch.old_thread_id, dispatch.new_thread_id, dispatch.old_context_length, dispatch.new_context_length);
+    else if constexpr (btb::has_context_switch<decltype(t)>)
+      t.on_context_switch(dispatch.old_thread_id, dispatch.new_thread_id);
   };
 
   std::apply([&](auto&... t) { (..., process_one(t)); }, intern_);
+}
+
+template <typename... Bs>
+std::unique_ptr<O3_CPU::branch_module_concept> O3_CPU::branch_module_model<Bs...>::create_fresh_instance(O3_CPU* cpu) const
+{
+  auto fresh = std::make_unique<branch_module_model<Bs...>>(cpu);
+  fresh->impl_initialize_branch_predictor();
+  return fresh;
+}
+
+template <typename... Ts>
+std::unique_ptr<O3_CPU::btb_module_concept> O3_CPU::btb_module_model<Ts...>::create_fresh_instance(O3_CPU* cpu) const
+{
+  auto fresh = std::make_unique<btb_module_model<Ts...>>(cpu);
+  fresh->impl_initialize_btb();
+  return fresh;
 }
 
 #ifdef SET_ASIDE_CHAMPSIM_MODULE

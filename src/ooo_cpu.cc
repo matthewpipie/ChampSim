@@ -24,6 +24,8 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
+#include "context_switch_schedule.h"
+
 #include "cache.h"
 #include "champsim.h"
 #include "context_switch_schedule.h"
@@ -63,8 +65,14 @@ long O3_CPU::operate()
   progress += add_progress(retire_rob(), RetireROB);                    // retire
 
   if (context_switch_sched != nullptr) {
-    while (auto new_thread_id = context_switch_sched->check_and_advance(num_retired)) {
-      handle_context_switch(*new_thread_id);
+    while (auto boundary = context_switch_sched->check_and_advance(num_retired)) {
+      const context_switch_dispatch dispatch{
+          current_thread_id,
+          boundary->new_thread_id,
+          boundary->old_context_length,
+          boundary->new_context_length,
+      };
+      handle_context_switch(dispatch);
     }
   }
 
@@ -856,23 +864,63 @@ bool O3_CPU::impl_predict_branch(champsim::address ip, champsim::address predict
   return branch_module_pimpl->impl_predict_branch(ip, predicted_target, always_taken, branch_type, cheating_branch_taken);
 }
 
-void O3_CPU::impl_context_switch(uint64_t old_thread_id, uint64_t new_thread_id) const
+void O3_CPU::auto_save_restore_branch_module(uint64_t old_thread_id, uint64_t new_thread_id)
 {
-  branch_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
-  btb_module_pimpl->impl_context_switch(old_thread_id, new_thread_id);
+  thread_branch_module_snapshots_[old_thread_id] = std::move(branch_module_pimpl);
+
+  if (auto saved_it = thread_branch_module_snapshots_.find(new_thread_id);
+      saved_it != thread_branch_module_snapshots_.end() && saved_it->second != nullptr) {
+    branch_module_pimpl = std::move(saved_it->second);
+  } else {
+    branch_module_pimpl = thread_branch_module_snapshots_.at(old_thread_id)->create_fresh_instance(this);
+  }
 }
 
-void O3_CPU::handle_context_switch(uint64_t new_thread_id)
+void O3_CPU::auto_save_restore_btb_module(uint64_t old_thread_id, uint64_t new_thread_id)
 {
-  const uint64_t old_thread_id = current_thread_id;
+  thread_btb_module_snapshots_[old_thread_id] = std::move(btb_module_pimpl);
+
+  if (auto saved_it = thread_btb_module_snapshots_.find(new_thread_id);
+      saved_it != thread_btb_module_snapshots_.end() && saved_it->second != nullptr) {
+    btb_module_pimpl = std::move(saved_it->second);
+  } else {
+    btb_module_pimpl = thread_btb_module_snapshots_.at(old_thread_id)->create_fresh_instance(this);
+  }
+}
+
+void O3_CPU::impl_context_switch(const context_switch_dispatch& dispatch) const
+{
+  if (!thread_switch_auto_save_bp) {
+    branch_module_pimpl->impl_context_switch(dispatch);
+  }
+  if (!thread_switch_auto_save_btb) {
+    btb_module_pimpl->impl_context_switch(dispatch);
+  }
+}
+
+void O3_CPU::handle_context_switch(const context_switch_dispatch& dispatch)
+{
+  const uint64_t old_thread_id = dispatch.old_thread_id;
+  const uint64_t new_thread_id = dispatch.new_thread_id;
   current_thread_id = new_thread_id;
-  impl_context_switch(old_thread_id, new_thread_id);
+
+  if (thread_switch_auto_save_bp) {
+    auto_save_restore_branch_module(old_thread_id, new_thread_id);
+  } else {
+    branch_module_pimpl->impl_context_switch(dispatch);
+  }
+
+  if (thread_switch_auto_save_btb) {
+    auto_save_restore_btb_module(old_thread_id, new_thread_id);
+  } else {
+    btb_module_pimpl->impl_context_switch(dispatch);
+  }
 
   if (champsim::g_env != nullptr) {
     for (auto cache_ref : champsim::g_env->cache_view()) {
       CACHE& cache = cache_ref.get();
       if (cache.context_switch_aware && cache.cpu == cpu) {
-        cache.handle_context_switch(old_thread_id, new_thread_id);
+        cache.handle_context_switch(dispatch);
       }
     }
   }
