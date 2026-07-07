@@ -60,6 +60,11 @@ struct cache_builder_base {
   bool m_context_switch_aware{};
   bool m_thread_switch_auto_save_prefetcher{};
   bool m_thread_switch_auto_save_replacement{};
+  bool m_cs_realistic{};
+  bool m_cs_bypass_llc{};
+  champsim::bandwidth::maximum_type m_cs_max_per_cycle{champsim::bandwidth::maximum_type{1}};
+  std::size_t m_cs_max_outstanding{8};
+  double m_cs_wq_watermark{0.5};
 
   std::vector<access_type> m_pref_act_mask{access_type::LOAD, access_type::PREFETCH};
   std::vector<champsim::channel*> m_uls{};
@@ -238,6 +243,38 @@ public:
   self_type& set_thread_switch_auto_save_replacement();
 
   self_type& reset_thread_switch_auto_save_replacement();
+
+  /**
+   * Enable realistic L2C context-switch save/restore (background scratch-DRAM traffic instead of an
+   * instant magic swap). Requires ``set_context_switch_aware()``.
+   */
+  self_type& set_realistic_context_switch();
+
+  self_type& reset_realistic_context_switch();
+
+  /**
+   * Route scratch save/restore traffic past the LLC straight to memory (requires extra channel
+   * wiring; falls back to through-LLC until that is provided).
+   */
+  self_type& set_context_switch_bypass_llc();
+
+  self_type& reset_context_switch_bypass_llc();
+
+  /**
+   * Maximum number of scratch save+restore requests issued per cycle (background bandwidth cap).
+   */
+  self_type& context_switch_bandwidth(champsim::bandwidth::maximum_type max_per_cycle);
+
+  /**
+   * Maximum number of in-flight scratch restore reads.
+   */
+  self_type& context_switch_max_outstanding(std::size_t max_outstanding);
+
+  /**
+   * Congestion watermark (fraction of the target write queue) above which background save writebacks
+   * are held off, so they never starve demand writebacks or pin DRAM into write-drain mode.
+   */
+  self_type& context_switch_wq_watermark(double watermark);
 
   /**
    * Specify the ``access_type`` values that should activate the prefetcher.
@@ -551,6 +588,55 @@ template <typename P, typename R>
 auto champsim::cache_builder<P, R>::reset_thread_switch_auto_save_replacement() -> self_type&
 {
   m_thread_switch_auto_save_replacement = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_realistic_context_switch() -> self_type&
+{
+  m_cs_realistic = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::reset_realistic_context_switch() -> self_type&
+{
+  m_cs_realistic = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::set_context_switch_bypass_llc() -> self_type&
+{
+  m_cs_bypass_llc = true;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::reset_context_switch_bypass_llc() -> self_type&
+{
+  m_cs_bypass_llc = false;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::context_switch_bandwidth(champsim::bandwidth::maximum_type max_per_cycle) -> self_type&
+{
+  m_cs_max_per_cycle = max_per_cycle;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::context_switch_max_outstanding(std::size_t max_outstanding) -> self_type&
+{
+  m_cs_max_outstanding = max_outstanding;
+  return *this;
+}
+
+template <typename P, typename R>
+auto champsim::cache_builder<P, R>::context_switch_wq_watermark(double watermark) -> self_type&
+{
+  m_cs_wq_watermark = watermark;
   return *this;
 }
 

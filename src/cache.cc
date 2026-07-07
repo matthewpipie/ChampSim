@@ -37,12 +37,19 @@ CACHE::CACHE(CACHE&& other)
     : operable(other),
 
       upper_levels(std::move(other.upper_levels)), lower_level(std::move(other.lower_level)), lower_translate(std::move(other.lower_translate)),
+      cs_scratch_ll(std::move(other.cs_scratch_ll)),
 
       cpu(other.cpu), NAME(std::move(other.NAME)), NUM_SET(other.NUM_SET), NUM_WAY(other.NUM_WAY), MSHR_SIZE(other.MSHR_SIZE), PQ_SIZE(other.PQ_SIZE),
       HIT_LATENCY(other.HIT_LATENCY), FILL_LATENCY(other.FILL_LATENCY), OFFSET_BITS(other.OFFSET_BITS), block(std::move(other.block)), MAX_TAG(other.MAX_TAG),
       MAX_FILL(other.MAX_FILL), prefetch_as_load(other.prefetch_as_load), match_offset_bits(other.match_offset_bits), virtual_prefetch(other.virtual_prefetch),
       context_switch_aware(other.context_switch_aware), thread_switch_auto_save_prefetcher(other.thread_switch_auto_save_prefetcher),
       thread_switch_auto_save_replacement(other.thread_switch_auto_save_replacement), thread_snapshots_(std::move(other.thread_snapshots_)),
+      cs_realistic_(other.cs_realistic_), cs_bypass_llc_(other.cs_bypass_llc_), cs_max_per_cycle_(other.cs_max_per_cycle_),
+      cs_max_outstanding_(other.cs_max_outstanding_), cs_wq_watermark_(other.cs_wq_watermark_),
+      cs_scratch_base_lines_(other.cs_scratch_base_lines_),
+      cs_save_queue_(std::move(other.cs_save_queue_)), cs_restore_queue_(std::move(other.cs_restore_queue_)),
+      cs_restore_inflight_(std::move(other.cs_restore_inflight_)), cs_restore_outstanding_(other.cs_restore_outstanding_),
+      cs_thread_slot_(std::move(other.cs_thread_slot_)),
       thread_pref_module_snapshots_(std::move(other.thread_pref_module_snapshots_)),
       thread_repl_module_snapshots_(std::move(other.thread_repl_module_snapshots_)), pref_activate_mask(std::move(other.pref_activate_mask)),
 
@@ -63,6 +70,7 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   this->upper_levels = std::move(other.upper_levels);
   this->lower_level = std::move(other.lower_level);
   this->lower_translate = std::move(other.lower_translate);
+  this->cs_scratch_ll = std::move(other.cs_scratch_ll);
 
   this->cpu = other.cpu;
   this->NAME = std::move(other.NAME);
@@ -86,6 +94,17 @@ auto CACHE::operator=(CACHE&& other) -> CACHE&
   this->thread_switch_auto_save_prefetcher = other.thread_switch_auto_save_prefetcher;
   this->thread_switch_auto_save_replacement = other.thread_switch_auto_save_replacement;
   this->thread_snapshots_ = std::move(other.thread_snapshots_);
+  this->cs_realistic_ = other.cs_realistic_;
+  this->cs_bypass_llc_ = other.cs_bypass_llc_;
+  this->cs_max_per_cycle_ = other.cs_max_per_cycle_;
+  this->cs_max_outstanding_ = other.cs_max_outstanding_;
+  this->cs_wq_watermark_ = other.cs_wq_watermark_;
+  this->cs_scratch_base_lines_ = other.cs_scratch_base_lines_;
+  this->cs_save_queue_ = std::move(other.cs_save_queue_);
+  this->cs_restore_queue_ = std::move(other.cs_restore_queue_);
+  this->cs_restore_inflight_ = std::move(other.cs_restore_inflight_);
+  this->cs_restore_outstanding_ = other.cs_restore_outstanding_;
+  this->cs_thread_slot_ = std::move(other.cs_thread_slot_);
   this->thread_pref_module_snapshots_ = std::move(other.thread_pref_module_snapshots_);
   this->thread_repl_module_snapshots_ = std::move(other.thread_repl_module_snapshots_);
   this->pref_activate_mask = std::move(other.pref_activate_mask);
@@ -275,6 +294,11 @@ bool CACHE::try_hit(const tag_lookup_type& handle_pkt)
 {
   cpu = handle_pkt.cpu;
 
+  // The scratch (save/restore) DRAM region must never be touched by the workload. If a demand
+  // access lands in it, the scratch base is too low for this trace (or page randomization is on);
+  // fail loudly rather than silently corrupting workload state.
+  assert(!is_scratch_address(handle_pkt.address));
+
   // access cache
   auto [set_begin, set_end] = get_set_span(handle_pkt.address);
   auto way = std::find_if(set_begin, set_end, [matcher = matches_address(handle_pkt.address)](const auto& x) { return x.valid && matcher(x); });
@@ -459,10 +483,28 @@ long CACHE::operate()
     return entry.is_translated;
   };
 
-  // Finish returns
-  std::for_each(std::cbegin(lower_level->returned), std::cend(lower_level->returned), [this](const auto& pkt) { this->finish_packet(pkt); });
+  // Finish returns. Scratch (save/restore) reads carry fake-DRAM addresses and have no demand MSHR,
+  // so they must be routed to finish_restore() instead of finish_packet() (which asserts a match).
+  for (const auto& pkt : lower_level->returned) {
+    if (is_scratch_address(pkt.address)) {
+      finish_restore(pkt);
+    } else {
+      finish_packet(pkt);
+    }
+  }
   progress += std::distance(std::cbegin(lower_level->returned), std::cend(lower_level->returned));
   lower_level->returned.clear();
+
+  // Drain the optional bypass-LLC scratch channel the same way.
+  if (cs_scratch_ll != nullptr) {
+    for (const auto& pkt : cs_scratch_ll->returned) {
+      if (is_scratch_address(pkt.address)) {
+        finish_restore(pkt);
+      }
+    }
+    progress += std::distance(std::cbegin(cs_scratch_ll->returned), std::cend(cs_scratch_ll->returned));
+    cs_scratch_ll->returned.clear();
+  }
 
   // Finish translations
   if (lower_translate != nullptr) {
@@ -544,6 +586,10 @@ long CACHE::operate()
   inflight_tag_check.erase(tag_check_ready_begin, finish_tag_check_end);
 
   impl_prefetcher_cycle_operate();
+
+  // Background context-switch save/restore traffic, last so it only uses leftover channel space.
+  const long cs_issued = operate_context_switch();
+  progress += cs_issued;
 
   if constexpr (champsim::debug_print) {
     fmt::print("[{}] {} cycle completed: {} tags checked: {} remaining: {} stash consumed: {} remaining: {} channel consumed: {} pq consumed {} unused consume "
@@ -936,9 +982,56 @@ void CACHE::handle_context_switch(const context_switch_dispatch& dispatch)
 
   if (old_thread_id == new_thread_id) return;
 
-  thread_snapshots_[old_thread_id] = block;
-  if (auto snapshot_it = thread_snapshots_.find(new_thread_id); snapshot_it != thread_snapshots_.end()) {
-    block = snapshot_it->second;
+  if (cs_realistic_ && !warmup) {
+    // Realistic path: record the outgoing image as the functional source-of-truth for what to
+    // restore later, then launch throttled background save (writeback) and restore (prefetch)
+    // streams to the scratch DRAM region. The block vector is NOT instantly swapped; old lines
+    // stay valid and serving until the restore stream (or demand misses) overwrite them.
+    // Start a clean save/restore round. Abandon any previous round still queued (timing-only loss):
+    // this bounds the queues to one cache image and, crucially, guarantees no line is left stuck in
+    // SAVE_PEND — an orphaned SAVE_PEND would gate its set's restores forever and stall warm-up.
+    for (auto& b : block) {
+      if (b.cs_state == champsim::cs_line_state::SAVE_PEND) {
+        b.cs_state = champsim::cs_line_state::LIVE;
+      }
+    }
+    cs_save_queue_.clear();
+    cs_restore_queue_.clear();
+    // Abandon in-flight restore reads from the previous round; their late responses become no-ops
+    // (finish_restore finds no matching entry). Already-installed restored lines are kept.
+    cs_restore_inflight_.clear();
+    cs_restore_outstanding_ = 0;
+
+    thread_snapshots_[old_thread_id] = block;
+
+    // Enqueue SAVE ops for every currently-valid line; mark them SAVE_PEND (still valid/serving).
+    // The scratch slot index is the line's natural position in the block vector, so save and
+    // restore address exactly the same scratch slot and stay within the per-thread stride.
+    for (long i = 0; i < static_cast<long>(std::size(block)); ++i) {
+      auto& b = block[static_cast<std::size_t>(i)];
+      if (!b.valid) {
+        continue;
+      }
+      b.cs_state = champsim::cs_line_state::SAVE_PEND;
+      cs_save_queue_.push_back(cs_scratch_op{b.address, scratch_address_for(old_thread_id, i)});
+    }
+
+    // Enqueue RESTORE ops for the incoming thread's previously-saved lines, if any.
+    if (auto snapshot_it = thread_snapshots_.find(new_thread_id); snapshot_it != thread_snapshots_.end()) {
+      const auto& saved_image = snapshot_it->second;
+      for (long i = 0; i < static_cast<long>(std::size(saved_image)); ++i) {
+        if (saved_image[static_cast<std::size_t>(i)].valid) {
+          cs_restore_queue_.push_back(cs_scratch_op{saved_image[static_cast<std::size_t>(i)].address, scratch_address_for(new_thread_id, i)});
+        }
+      }
+    }
+
+    // Module state still uses the instant swap below (documented simplification).
+  } else {
+    thread_snapshots_[old_thread_id] = block;
+    if (auto snapshot_it = thread_snapshots_.find(new_thread_id); snapshot_it != thread_snapshots_.end()) {
+      block = snapshot_it->second;
+    }
   }
 
   if (thread_switch_auto_save_prefetcher) {
@@ -962,6 +1055,159 @@ void CACHE::impl_context_switch(const context_switch_dispatch& dispatch) const
   if (!thread_switch_auto_save_replacement) {
     repl_module_pimpl->impl_context_switch(dispatch);
   }
+}
+
+void CACHE::set_scratch_base_from_dram_size(uint64_t dram_size_bytes)
+{
+  // Reserve the top CS_MAX_THREADS cache images of the DRAM address space as the scratch region.
+  // Workload physical pages are handed out from low addresses upward (see VirtualMemory), so the
+  // top of DRAM stays unused; is_scratch_address()/the demand-path assertion enforce no overlap.
+  const uint64_t total_lines = dram_size_bytes >> champsim::to_underlying(OFFSET_BITS);
+  const uint64_t reserved_lines = CS_MAX_THREADS * static_cast<uint64_t>(NUM_SET) * NUM_WAY;
+  if (total_lines <= reserved_lines) {
+    fmt::print(stderr, "[{}] realistic context-switch scratch region ({} lines) does not fit in DRAM ({} lines)\n", NAME, reserved_lines, total_lines);
+    assert(0);
+    return;
+  }
+  cs_scratch_base_lines_ = total_lines - reserved_lines;
+}
+
+champsim::address CACHE::scratch_address_for(uint64_t thread_id, long line_index)
+{
+  // Assign each distinct thread a stable scratch slot (one full cache image wide).
+  auto [it, inserted] = cs_thread_slot_.try_emplace(thread_id, cs_thread_slot_.size());
+  const uint64_t slot = it->second;
+  assert(slot < CS_MAX_THREADS); // more concurrent threads than reserved scratch images
+  const uint64_t image_lines = static_cast<uint64_t>(NUM_SET) * NUM_WAY;
+  const uint64_t line = cs_scratch_base_lines_ + slot * image_lines + static_cast<uint64_t>(line_index);
+  return champsim::address{champsim::block_number{line}};
+}
+
+bool CACHE::is_scratch_address(champsim::address addr) const
+{
+  if (cs_scratch_base_lines_ == 0) {
+    return false; // base not configured (feature off): never divert
+  }
+  return champsim::block_number{addr}.to<uint64_t>() >= cs_scratch_base_lines_;
+}
+
+void CACHE::mark_line_saved(champsim::address line_address)
+{
+  auto [set_begin, set_end] = get_set_span(line_address);
+  auto way = std::find_if(set_begin, set_end, [matcher = matches_address(line_address)](const auto& x) { return x.valid && matcher(x); });
+  if (way != set_end && way->cs_state == champsim::cs_line_state::SAVE_PEND) {
+    way->cs_state = champsim::cs_line_state::LIVE;
+  }
+}
+
+bool CACHE::set_has_save_pending(champsim::address line_address)
+{
+  auto [set_begin, set_end] = get_set_span(line_address);
+  return std::any_of(set_begin, set_end, [](const auto& x) { return x.valid && x.cs_state == champsim::cs_line_state::SAVE_PEND; });
+}
+
+long CACHE::operate_context_switch()
+{
+  if (!cs_realistic_) {
+    return 0;
+  }
+
+  long issued = 0;
+  champsim::bandwidth bw{cs_max_per_cycle_};
+  channel_type* tgt = (cs_bypass_llc_ && cs_scratch_ll != nullptr) ? cs_scratch_ll : lower_level;
+
+  // Congestion-aware save throttle: hold background writebacks once the target write queue is at or
+  // above cs_wq_watermark_ of its capacity. Demand writebacks (dirty evictions) run last-in-cycle
+  // before this engine, so the reserved headroom stays available to them; and by never filling the
+  // WQ we keep DRAM from latching into write-drain mode and starving demand/translation reads.
+  const std::size_t wq_cap = tgt->wq_size();
+  const auto wq_headroom_ok = [&]() {
+    return static_cast<double>(tgt->wq_occupancy()) < cs_wq_watermark_ * static_cast<double>(wq_cap);
+  };
+
+  // SAVE first: writeback stream (fire-and-forget). Clearing SAVE_PEND on issue lets the matching
+  // set's restores proceed (see set gate below), enforcing save-before-restore within a set.
+  while (bw.has_remaining() && !cs_save_queue_.empty() && wq_headroom_ok()) {
+    const auto& op = cs_save_queue_.front();
+    request_type wb;
+    wb.cpu = cpu;
+    wb.address = op.scratch_address;
+    wb.v_address = op.scratch_address;
+    wb.type = access_type::WRITE;
+    wb.response_requested = false;
+    wb.is_translated = true;
+    if (!tgt->add_wq(wb)) {
+      break; // queue full -> backpressure, retry next cycle
+    }
+    mark_line_saved(op.line_address);
+    cs_save_queue_.pop_front();
+    bw.consume(1);
+    ++issued;
+  }
+
+  // RESTORE: prefetch stream, bounded outstanding, gated so it never outruns its set's saves.
+  while (bw.has_remaining() && !cs_restore_queue_.empty() && cs_restore_outstanding_ < cs_max_outstanding_) {
+    const auto& op = cs_restore_queue_.front();
+    if (set_has_save_pending(op.line_address)) {
+      break; // do not evict an as-yet-unsaved line in this set; saves drain in parallel
+    }
+    request_type rd;
+    rd.cpu = cpu;
+    rd.address = op.scratch_address;
+    rd.v_address = op.scratch_address;
+    rd.type = access_type::LOAD;
+    rd.response_requested = true;
+    rd.is_translated = true;
+    if (!tgt->add_rq(rd)) {
+      break;
+    }
+    cs_restore_inflight_.emplace(op.scratch_address.to<uint64_t>(), op);
+    cs_restore_queue_.pop_front();
+    ++cs_restore_outstanding_;
+    bw.consume(1);
+    ++issued;
+  }
+
+  return issued;
+}
+
+void CACHE::finish_restore(const response_type& packet)
+{
+  auto it = cs_restore_inflight_.find(packet.address.to<uint64_t>());
+  if (it == cs_restore_inflight_.end()) {
+    return; // defensive: response we did not originate
+  }
+  const auto line_address = it->second.line_address; // real (workload) tag to install
+  cs_restore_inflight_.erase(it);
+  if (cs_restore_outstanding_ > 0) {
+    --cs_restore_outstanding_;
+  }
+
+  auto [set_begin, set_end] = get_set_span(line_address);
+  if (std::any_of(set_begin, set_end, [matcher = matches_address(line_address)](const auto& x) { return x.valid && matcher(x); })) {
+    return; // a demand miss already filled this line; restore is a no-op (benign)
+  }
+
+  auto way = std::find_if_not(set_begin, set_end, [](const auto& x) { return x.valid; });
+  if (way == set_end) {
+    const long victim = impl_find_victim(cpu, 0, get_set_index(line_address), &*set_begin, line_address, line_address, access_type::LOAD);
+    if (victim < 0) {
+      return; // bypass: line stays cold (accurate)
+    }
+    way = std::next(set_begin, victim);
+  }
+  if (way->cs_state == champsim::cs_line_state::SAVE_PEND) {
+    return; // never evict an as-yet-unsaved line (a switch re-marked this set mid-flight); skip
+  }
+
+  const auto set_idx = get_set_index(line_address);
+  const auto way_idx = std::distance(set_begin, way);
+  *way = BLOCK{};
+  way->valid = true;
+  way->address = line_address;
+  way->kind = champsim::line_kind::Data;
+  way->cs_state = champsim::cs_line_state::LIVE;
+  impl_replacement_cache_fill(cpu, set_idx, way_idx, line_address, champsim::address{}, champsim::address{}, access_type::LOAD);
 }
 
 void CACHE::initialize()

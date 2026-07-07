@@ -160,6 +160,7 @@ public:
   std::vector<channel_type*> upper_levels;
   channel_type* lower_level;
   channel_type* lower_translate;
+  channel_type* cs_scratch_ll{nullptr}; // optional bypass-LLC channel for scratch traffic (future wiring)
 
   uint32_t cpu = 0;
   std::string NAME;
@@ -177,6 +178,28 @@ public:
   bool thread_switch_auto_save_prefetcher{};
   bool thread_switch_auto_save_replacement{};
   std::unordered_map<uint64_t, std::vector<BLOCK>> thread_snapshots_{};
+
+  // --- realistic context-switch save/restore (see src/cache.cc) ---
+  // When cs_realistic_ is set, a thread switch streams the outgoing thread's line metadata out
+  // to a reserved ("fake") DRAM scratch region and reads the incoming thread's metadata back in,
+  // as throttled background traffic on the normal channels, instead of an instant magic swap.
+  struct cs_scratch_op {
+    champsim::address line_address{};    // real (workload) tag of the line
+    champsim::address scratch_address{}; // fake DRAM address for this (thread, line) slot
+  };
+  static constexpr uint64_t CS_MAX_THREADS = 64;  // distinct threads with a reserved scratch image
+  bool cs_realistic_{};
+  bool cs_bypass_llc_{};
+  champsim::bandwidth::maximum_type cs_max_per_cycle_{champsim::bandwidth::maximum_type{1}};
+  std::size_t cs_max_outstanding_{8};
+  double cs_wq_watermark_{0.5};                        // hold saves when target WQ is this full (fraction)
+  uint64_t cs_scratch_base_lines_{0};                  // set from DRAM size in main.cc
+  std::deque<cs_scratch_op> cs_save_queue_{};          // metadata to stream OUT (add_wq)
+  std::deque<cs_scratch_op> cs_restore_queue_{};       // metadata to read BACK  (add_rq)
+  std::unordered_map<uint64_t, cs_scratch_op> cs_restore_inflight_{}; // key = scratch addr (raw)
+  std::size_t cs_restore_outstanding_{0};
+  std::unordered_map<uint64_t, uint64_t> cs_thread_slot_{};           // thread_id -> scratch slot
+
   std::vector<access_type> pref_activate_mask;
 
   using stats_type = cache_stats;
@@ -194,6 +217,15 @@ public:
 
   void auto_save_restore_prefetcher_module(uint64_t old_thread_id, uint64_t new_thread_id);
   void auto_save_restore_replacement_module(uint64_t old_thread_id, uint64_t new_thread_id);
+
+  // realistic context-switch save/restore helpers
+  long operate_context_switch();
+  void finish_restore(const response_type& packet);
+  [[nodiscard]] bool is_scratch_address(champsim::address addr) const;
+  champsim::address scratch_address_for(uint64_t thread_id, long line_index);
+  void mark_line_saved(champsim::address line_address);
+  [[nodiscard]] bool set_has_save_pending(champsim::address line_address);
+  void set_scratch_base_from_dram_size(uint64_t dram_size_bytes); // called from main.cc
 
   [[deprecated]] std::size_t get_occupancy(uint8_t queue_type, champsim::address address) const;
   [[deprecated]] std::size_t get_size(uint8_t queue_type, champsim::address address) const;
@@ -358,7 +390,10 @@ public:
         FILL_LATENCY(b.get_fill_latency() * b.m_clock_period), OFFSET_BITS(b.m_offset_bits), MAX_TAG(b.get_tag_bandwidth()), MAX_FILL(b.get_fill_bandwidth()),
         prefetch_as_load(b.m_pref_load), match_offset_bits(b.m_wq_full_addr), virtual_prefetch(b.m_va_pref),
         context_switch_aware(b.m_context_switch_aware), thread_switch_auto_save_prefetcher(b.m_thread_switch_auto_save_prefetcher),
-        thread_switch_auto_save_replacement(b.m_thread_switch_auto_save_replacement), pref_activate_mask(b.m_pref_act_mask),
+        thread_switch_auto_save_replacement(b.m_thread_switch_auto_save_replacement), cs_realistic_(b.m_cs_realistic),
+        cs_bypass_llc_(b.m_cs_bypass_llc), cs_max_per_cycle_(b.m_cs_max_per_cycle), cs_max_outstanding_(b.m_cs_max_outstanding),
+        cs_wq_watermark_(b.m_cs_wq_watermark),
+        pref_activate_mask(b.m_pref_act_mask),
         pref_module_pimpl(std::make_unique<prefetcher_module_model<Ps...>>(this)), repl_module_pimpl(std::make_unique<replacement_module_model<Rs...>>(this))
   {
   }

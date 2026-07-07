@@ -169,6 +169,14 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     }
   }
 
+  // Derive each realistic-context-switch cache's scratch base from the actual DRAM size, reserving
+  // the top of the physical address space (unused by the low-growing workload footprint).
+  for (CACHE& cache : gen_environment.cache_view()) {
+    if (cache.cs_realistic_) {
+      cache.set_scratch_base_from_dram_size(gen_environment.dram_view().size().count());
+    }
+  }
+
   std::vector<champsim::tracereader> traces;
   std::transform(
       std::begin(trace_names), std::end(trace_names), std::back_inserter(traces),

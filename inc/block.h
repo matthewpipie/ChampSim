@@ -23,12 +23,21 @@ namespace champsim
 {
 enum class line_kind { PrefetchUnknown, Data, Instr };
 
+// Realistic context-switch save/restore (see CACHE::handle_context_switch).
+//   LIVE       - normal line.
+//   SAVE_PEND  - still-valid, still-serving line whose metadata writeout to the scratch
+//                region is queued/in-flight; cleared to LIVE once the save write is issued.
+//   RESTORE_PEND - reserved for a future pre-placement variant (unused in the baseline,
+//                  which tracks restores in a side map).
+enum class cs_line_state : uint8_t { LIVE, SAVE_PEND, RESTORE_PEND };
+
 struct cache_block {
   bool valid = false;
   bool prefetch = false;
   bool dirty = false;
 
   line_kind kind = line_kind::Data;
+  cs_line_state cs_state = cs_line_state::LIVE;
 
   champsim::address address{};
   champsim::address v_address{};

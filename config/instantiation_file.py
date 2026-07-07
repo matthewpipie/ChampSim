@@ -79,6 +79,9 @@ cache_builder_parts = {
     'fill_latency': '.fill_latency({fill_latency})',
     'max_tag_check': '.tag_bandwidth(champsim::bandwidth::maximum_type{{{max_tag_check}}})',
     'max_fill': '.fill_bandwidth(champsim::bandwidth::maximum_type{{{max_fill}}})',
+    'context_switch_bandwidth': '.context_switch_bandwidth(champsim::bandwidth::maximum_type{{{context_switch_bandwidth}}})',
+    'context_switch_max_outstanding': '.context_switch_max_outstanding({context_switch_max_outstanding})',
+    'context_switch_wq_watermark': '.context_switch_wq_watermark({context_switch_wq_watermark})',
     '_offset_bits': '.offset_bits(champsim::data::bits{{{_offset_bits}}})',
     'prefetch_activate': '.prefetch_activate({^prefetch_activate_string})',
     '_replacement_data': '.replacement<{^replacement_string}>()',
@@ -163,7 +166,11 @@ def get_cache_builder(elem, ul_pairs):
         ('thread_switch_auto_save_prefetcher', True): '.set_thread_switch_auto_save_prefetcher()',
         ('thread_switch_auto_save_prefetcher', False): '.reset_thread_switch_auto_save_prefetcher()',
         ('thread_switch_auto_save_replacement', True): '.set_thread_switch_auto_save_replacement()',
-        ('thread_switch_auto_save_replacement', False): '.reset_thread_switch_auto_save_replacement()'
+        ('thread_switch_auto_save_replacement', False): '.reset_thread_switch_auto_save_replacement()',
+        ('realistic_context_switch', True): '.set_realistic_context_switch()',
+        ('realistic_context_switch', False): '.reset_realistic_context_switch()',
+        ('context_switch_bypass_llc', True): '.set_context_switch_bypass_llc()',
+        ('context_switch_bypass_llc', False): '.reset_context_switch_bypass_llc()'
     }
 
     uppers = (v for v in ul_pairs if v[0] == elem.get('name'))
