@@ -57,7 +57,9 @@ long do_cycle(environment& env, std::vector<tracereader>& traces, std::vector<st
       continue;
 
     auto& trace = traces.at(trace_index.at(cpu.cpu));
-    for (auto pkt_count = cpu.IN_QUEUE_SIZE - static_cast<long>(std::size(cpu.input_queue)); !trace.eof() && pkt_count > 0; --pkt_count) {
+    // has_next() lets a live source (DynamoRIO) report a front-end bubble
+    // (WAIT/IDLE) by pushing nothing this cycle; file readers always return true.
+    for (auto pkt_count = cpu.IN_QUEUE_SIZE - static_cast<long>(std::size(cpu.input_queue)); !trace.eof() && pkt_count > 0 && trace.has_next(); --pkt_count) {
       cpu.input_queue.push_back(trace());
     }
   }
@@ -137,15 +139,13 @@ phase_stats do_phase(const phase_info& phase, environment& env, std::vector<trac
       abort();
     }
 
-    // If any trace reaches EOF, terminate all phases
-    if (std::any_of(std::begin(traces), std::end(traces), [](const auto& tr) { return tr.eof(); })) {
-      std::fill(std::begin(next_phase_complete), std::end(next_phase_complete), true);
-    }
-
     // Check for phase finish
     for (O3_CPU& cpu : env.cpu_view()) {
-      // Phase complete
-      next_phase_complete[cpu.cpu] = next_phase_complete[cpu.cpu] || (cpu.sim_instr() >= length);
+      // Phase complete when this CPU hits the instruction budget or its own
+      // trace is exhausted (per-CPU termination; a single trace ending no
+      // longer kills the whole phase, so the DynamoRIO shared scheduler can
+      // halt a starved core without stopping the others).
+      next_phase_complete[cpu.cpu] = next_phase_complete[cpu.cpu] || (cpu.sim_instr() >= length) || traces.at(trace_index.at(cpu.cpu)).eof();
 
       //halt cpu if warmup
       if(next_phase_complete[cpu.cpu] && is_warmup && !cpu.halt) {

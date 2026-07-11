@@ -1,6 +1,7 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import re
 import sys
 
 # Bytes per trace record in inc/trace_instruction.h (verified via sizeof with g++):
@@ -61,6 +62,12 @@ class GoogleSuite:
         traces = sorted((self.BASE_DIR / workload).glob("*.gz"), key = lambda x:
             int(x.name.split("_")[1].split(".")[0]))
         return list(map(lambda x: [x, 1.0 / len(traces), self.WARMUP, self.SIMTIME, []], traces))
+    def multicore_workload(self):
+        # A workload's traces are the concurrent per-core threads of one program
+        # (whiskey_0000, whiskey_0001, ...), so on a multicore binary submit.py
+        # bundles them into a single NUM_CPUS-wide job rather than N single-core runs.
+        # Inert when NUM_CPUS == 1: submit.py keeps the original per-trace behavior.
+        return True
     def name(self):
         return "googleV2"
     def out_dir(self, executable_name, is_study):
@@ -247,6 +254,48 @@ class GooglePerThreadLenSuite:
         return "googleV2perthreadlen"
 
 
+class GoogleDRSuite:
+    """Live in-process DynamoRIO feed (see inc/dynamorio_source.h and CLAUDE.md).
+
+    Unlike the file-based google suites, each *workload* is a SINGLE job: the
+    whole DynamoRIO thread-trace directory is reconstructed into NUM_CPUS cores
+    inside one simulation, driven by the live scheduler. There is no per-core
+    ChampSim trace file.
+
+    The "hijack": the trace is delivered via the custom flag
+    ``--dynamorio-trace-dir <workload>/trace`` carried in the flags field
+    instead of a positional trace file. submit.py detects that flag and omits
+    the positional trace (they are mutually exclusive at the CLI).
+
+    The number of reconstructed cores is the *executable's* compile-time
+    NUM_CPUS. Build/select an executable (with ``make DYNAMORIO=1``) whose
+    num_cores matches the workload's peak_live_core_count, and use submit.py's
+    workload filter to pick matching workloads. get_peak_core_count() exposes
+    that value; run ``python3 suites.py`` to list it per workload.
+
+    Run with study_mode=0 (normal sim) — study/parity modes take a single
+    positional trace and are incompatible with the DR feed.
+    """
+    BASE_DIR = Path("/mnt/storage/traces/gtrace_v2_redownload/external-traces-v2/")
+    WARMUP = 50_000_000
+    SIMTIME = 500_000_000
+    TRACE_RECORD_BYTES = 64  # sizeof(input_instr); reconstructed on the fly
+    def get_workloads(self):
+        return sorted(x.name for x in self.BASE_DIR.glob("*") if (x / "trace").is_dir())
+    def get_peak_core_count(self, workload):
+        info = self.BASE_DIR / workload / "aux" / "info.textproto"
+        if not info.exists():
+            return None
+        m = re.search(r"peak_live_core_count\s*:?\s*(\d+)", info.read_text())
+        return int(m.group(1)) if m else None
+    def get_traces_and_weights_in_workload(self, workload):
+        trace_dir = (self.BASE_DIR / workload / "trace").absolute()
+        # One entry per workload (weight 1.0); flags carry the DR trace dir.
+        return [[trace_dir, 1.0, self.WARMUP, self.SIMTIME, ["--dynamorio-trace-dir", str(trace_dir)]]]
+    def name(self):
+        return "googleDR"
+
+
 class QualcommSuite:
     BASE_DIR = Path("/mnt/storage/traces/qualcomm/ipc1_public/")
     WARMUP = 50_000_000
@@ -365,7 +414,7 @@ class LigraSuite:
         return "ligra"
 
 
-SUITES = [SpecSuite(), GoogleSuite(), GooglePerThreadSuite(), GooglePerThreadLenSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
+SUITES = [SpecSuite(), GoogleSuite(), GooglePerThreadSuite(), GooglePerThreadLenSuite(), GoogleDRSuite(), QualcommSuite(), Parsec21Suite(), GAPSuite(), CloudSuite(), AIMLSuite(), GMSSuite(), LigraSuite()]
 SUITE_MAP = {x.name(): x for x in SUITES}
 
 if __name__ == "__main__":

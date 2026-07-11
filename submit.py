@@ -19,6 +19,28 @@ filt = sys.argv[4] if len(sys.argv) > 4 else None
 
 executable_name = executable.name
 
+def executable_num_cpus(exe_name):
+    """Number of cores the binary was compiled for.
+
+    Authoritative source is the generated config's ``num_cores``; fall back to
+    the naming convention ``champsim_core.<N>.<ver>...`` (see build.py/CLAUDE.md).
+    """
+    cfg = Path("generated_configs") / f"{exe_name}.json"
+    if cfg.exists():
+        try:
+            n = json.loads(cfg.read_text()).get("num_cores")
+            if n:
+                return int(n)
+        except (ValueError, KeyError, json.JSONDecodeError):
+            pass
+    # champsim_core.2.v2.,_l1i... -> ['champsim_core','2','v2',''] -> 2
+    try:
+        return int(exe_name.split(",")[0].split(".")[1])
+    except (IndexError, ValueError):
+        return 1
+
+NUM_CPUS = executable_num_cpus(executable_name)
+
 if suite_name == "all":
     suites = list(SUITE_MAP.values())
     input("u sure you want all?")
@@ -50,8 +72,6 @@ for suite in suites:
 
     outdir = Path(OUT_DIR).mkdir(parents=True, exist_ok=True)
 
-    N_CORES_PER_PROCESS = 1
-
     for workload in workloads:
         if filt:
             if filt not in workload:
@@ -63,12 +83,28 @@ for suite in suites:
         trace_files = list(suite.get_traces_and_weights_in_workload(workload))
         #print(f"\tWorkload {workload}: {len(trace_files)} traces found")
         assert len(trace_files) != 0
-        for i, trace_file_and_weight_and_instrs in enumerate(trace_files):
-            trace_file = trace_file_and_weight_and_instrs[0]
-            weight = trace_file_and_weight_and_instrs[1]
-            warmup = trace_file_and_weight_and_instrs[2]
-            simtime = trace_file_and_weight_and_instrs[3]
-            flags = trace_file_and_weight_and_instrs[4]
+
+        # Group traces into jobs. For suites whose per-workload traces are the
+        # concurrent per-core threads of one program (GoogleSuite: whiskey_0000,
+        # whiskey_0001, ...), a multicore binary runs them together as ONE job
+        # of NUM_CPUS positional traces. Otherwise (simpoints, single-core) each
+        # trace is its own single-core job -- the original behavior.
+        per_core = getattr(suite, "multicore_workload", lambda: False)()
+        if study_mode == 0 and NUM_CPUS > 1 and per_core:
+            if len(trace_files) != NUM_CPUS:
+                print(f"\tSkipping {workload}: {len(trace_files)} core traces but "
+                      f"executable has {NUM_CPUS} cores (need an exact match)")
+                continue
+            groups = [trace_files]              # one multicore job for the workload
+        else:
+            groups = [[tf] for tf in trace_files]  # one single-core job per trace
+
+        for i, group in enumerate(groups):
+            n_cores = len(group)
+            # warmup/simtime/flags are shared across the group's cores
+            warmup = group[0][2]
+            simtime = group[0][3]
+            flags = group[0][4]
             command = []
             command.append(str(executable.absolute()))
             if study_mode:
@@ -79,9 +115,14 @@ for suite in suites:
             command.extend(["--warmup-instructions", str(warmup)])
             command.extend(["--simulation-instructions", str(simtime)])
             command.extend(flags)
-            command.extend([str(trace_file.absolute())])
+            # DynamoRIO online feed (googleDR): the trace is delivered via
+            # --dynamorio-trace-dir in `flags`, and a positional trace file is
+            # mutually exclusive with it at the CLI, so don't append one.
+            # Otherwise append one positional trace per core in the group.
+            if "--dynamorio-trace-dir" not in flags:
+                command.extend([str(tf[0].absolute()) for tf in group])
 
-            name_p = f"{workload},{i:03},{N_CORES_PER_PROCESS},{i*N_CORES_PER_PROCESS:03},{warmup},{simtime}"
+            name_p = f"{workload},{i:03},{n_cores},{i*n_cores:03},{warmup},{simtime}"
             outname = f"{name_p}.raw"
             #jobname = f"{suite_name}---{study_mode}---{executable_name}---{name_p}.job"[:255]
             s = 's' if study_mode else 'y' if "google" in suite_name else 'z'

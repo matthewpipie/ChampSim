@@ -1,7 +1,7 @@
 import sys
 import json
 import subprocess
-from pathlib import Path 
+from pathlib import Path
 
 config_json_files = sys.argv[1:]
 

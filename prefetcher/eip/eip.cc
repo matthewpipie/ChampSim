@@ -27,11 +27,17 @@ uint32_t eip::prefetcher_cache_fill(champsim::address addr, long set, long way, 
 ////////////////////////////////////////////////////////////////////////
 
 //#include "ooo_cpu.h"
+#include <cassert>
 #include <iostream>
+
+#include "cache.h" // for intern_->cpu (real per-core id)
 using namespace std;
 
-// TOOD: improve these
-#define NUM_CPUS (1)
+// EIP keeps all of its state in file-scope statics indexed by the core id.
+// The original code hardcoded a single core; NUM_CPUS is now a compile-time
+// upper bound on the number of cores this prefetcher supports. The real core
+// id comes from intern_->cpu and is asserted < NUM_CPUS in initialize().
+#define NUM_CPUS (8)
 static uint64_t current_core_cycle[NUM_CPUS];
 #define L1I_PQ_SIZE (32)
 #define L1I_MSHR_SIZE (8+16)
@@ -654,9 +660,21 @@ static uint64_t l1i_get_xpq(uint64_t &entangled_addr) {
 
 // INTERFACE
 
-void eip::prefetcher_initialize() 
+void eip::prefetcher_initialize()
 {
-  cout << "CPU " << cpu << " EPI prefetcher" << endl;
+  // Derive this L1I's fixed owner core from its cache NAME ("cpuN_L1I").
+  // intern_->cpu is set per-request and is still 0 at initialize() time, so it
+  // can't be used here; the NAME is the only fixed per-instance owner id.
+  cpu = 0;
+  const std::string& nm = intern_->NAME;
+  if (nm.rfind("cpu", 0) == 0) {
+    cpu = 0;
+    for (size_t i = 3; i < nm.size() && nm[i] >= '0' && nm[i] <= '9'; i++)
+      cpu = cpu * 10 + (nm[i] - '0');
+  }
+  assert(cpu >= 0 && static_cast<uint32_t>(cpu) < NUM_CPUS
+         && "EIP: increase local NUM_CPUS to cover the configured core count");
+  cout << "CPU " << cpu << " EPI prefetcher (" << nm << ")" << endl;
 
   l1i_cpu_id = cpu;
   l1i_last_basic_block = 0;
@@ -762,6 +780,7 @@ uint32_t eip::prefetcher_cache_operate(champsim::address __addr, champsim::addre
 
 void eip::prefetcher_cycle_operate()
 {
+  l1i_cpu_id = cpu;
   // Do prefetches
   while (can_prefetch_line() && !l1i_empty_xpq()) {
     uint64_t entangled_addr = 0; 
@@ -772,7 +791,7 @@ void eip::prefetcher_cycle_operate()
       l1i_add_timing_entry(pf_line_addr, entangled_addr);
     }
   }
-  current_core_cycle[0]++;
+  current_core_cycle[l1i_cpu_id]++;
 }
 
 //void eip::prefetcher_cache_fill(uint64_t v_addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_v_addr)

@@ -21,6 +21,7 @@
 #include <vector>
 #include <CLI/CLI.hpp>
 #include <fmt/core.h>
+#include <sys/resource.h>
 
 #include "cache.h" // for CACHE
 #include "champsim.h"
@@ -29,6 +30,8 @@
 #endif
 #include "defaults.hpp"
 #include "dpc_api.h"
+#include "dynamorio_core_source.h"
+#include "dynamorio_source.h"
 #include "environment.h"
 #include "event_listeners.h"
 #include "ooo_cpu.h" // for O3_CPU
@@ -78,6 +81,14 @@ long long get_retired_insts(uint8_t cpu_id)
 #ifndef CHAMPSIM_TEST_BUILD
 int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 {
+  // M1 DynamoRIO link smoke test: handled before CLI parsing so it does not
+  // require the (otherwise mandatory) positional trace arguments.
+  for (int i = 1; i < argc; ++i) {
+    if (std::string{argv[i]} == "--dr-selftest") {
+      return champsim::dr::selftest();
+    }
+  }
+
   configured_environment gen_environment{};
 
   CLI::App app{"A microarchitecture simulator for research and education"};
@@ -88,6 +99,8 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
   std::string json_file_name;
   std::vector<std::string> requested_listeners;
   std::vector<std::string> trace_names;
+  std::string dynamorio_trace_dir;
+  std::string dr_dump_file;
 
   auto set_heartbeat_callback = [&](auto) {
     for (O3_CPU& cpu : gen_environment.cpu_view()) {
@@ -113,9 +126,72 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
 
   app.add_option("--listeners", requested_listeners, "A list of the listeners to be attached to the run");
 
-  app.add_option("traces", trace_names, "The paths to the traces")->required()->expected(NUM_CPUS)->check(CLI::ExistingFile);
+  app.add_option("--dynamorio-trace-dir", dynamorio_trace_dir,
+                 "Feed instructions live from a DynamoRIO thread-trace directory (the workload's trace/ subdir) instead of trace files. "
+                 "Reconstructs NUM_CPUS cores from the thread traces.");
+  app.add_option("--dr-dump-trace", dr_dump_file,
+                 "[debug] Dump --simulation-instructions input_instr records from a 1-core DynamoRIO feed (offline parity, no time feedback) to this "
+                 "file and exit. Requires --dynamorio-trace-dir and -i.");
+
+  // Positional traces are optional: they are mutually exclusive with
+  // --dynamorio-trace-dir (validated after parsing).
+  app.add_option("traces", trace_names, "The paths to the traces")->expected(0, static_cast<int>(NUM_CPUS))->check(CLI::ExistingFile);
 
   CLI11_PARSE(app, argc, argv);
+
+  const bool dr_mode = !dynamorio_trace_dir.empty() || !dr_dump_file.empty();
+
+  // Raise the open-file limit before the DynamoRIO scheduler opens every thread
+  // trace at init (mirrors the offline converter's setrlim()).
+  if (dr_mode) {
+    rlimit lim{};
+    if (getrlimit(RLIMIT_NOFILE, &lim) == 0) {
+      lim.rlim_cur = lim.rlim_max;
+      if (setrlimit(RLIMIT_NOFILE, &lim) != 0) {
+        fmt::print("WARNING: could not raise RLIMIT_NOFILE; DynamoRIO scheduler init may fail on wide traces.\n");
+      }
+    }
+  }
+
+  // Debug M2 parity path: dump the raw input_instr stream from a 1-core live
+  // feed (no simulated clock, offline scheduler options) and exit before any
+  // simulator setup. Compare against the offline .champsim.gz reference.
+  if (!dr_dump_file.empty()) {
+    if (dynamorio_trace_dir.empty()) {
+      fmt::print("ERROR: --dr-dump-trace requires --dynamorio-trace-dir.\n");
+      return 1;
+    }
+    if (sim_instr_option->count() == 0 && deprec_sim_instr_option->count() == 0) {
+      fmt::print("ERROR: --dr-dump-trace requires -i/--simulation-instructions (the record count).\n");
+      return 1;
+    }
+    champsim::dr::dr_config cfg;
+    cfg.trace_dir = dynamorio_trace_dir;
+    cfg.num_cores = 1;
+    cfg.use_time_feedback = false;
+    cfg.dependency_timestamps = true;
+    champsim::dr::dr_scheduler sched{cfg};
+
+    std::ofstream out{dr_dump_file, std::ios::binary};
+    if (!out) {
+      fmt::print("ERROR: could not open dump file {}\n", dr_dump_file);
+      return 1;
+    }
+    long long produced = 0;
+    while (produced < simulation_instructions) {
+      input_instr rec{};
+      bool eof = false;
+      if (sched.try_next(0, 0, rec, eof)) {
+        out.write(reinterpret_cast<const char*>(&rec), sizeof(rec));
+        ++produced;
+      } else if (eof) {
+        break;
+      }
+    }
+    out.close();
+    fmt::print("[dr] dumped {} input_instr records to {}\n", produced, dr_dump_file);
+    return 0;
+  }
 
   champsim::g_env = &gen_environment;
   init_event_listeners(requested_listeners);
@@ -137,10 +213,39 @@ int main(int argc, char** argv) // NOLINT(bugprone-exception-escape)
     warmup_instructions = simulation_instructions / 5;
   }
 
+  // dr_sched must outlive `traces` and champsim::main (the live sources hold a
+  // pointer into it), so it lives at main() scope on the heap for a stable
+  // address.
+  std::unique_ptr<champsim::dr::dr_scheduler> dr_sched;
   std::vector<champsim::tracereader> traces;
-  std::transform(
-      std::begin(trace_names), std::end(trace_names), std::back_inserter(traces),
-      [knob_cloudsuite, repeat = simulation_given, i = uint8_t(0)](auto name) mutable { return get_tracereader(name, i++, knob_cloudsuite, repeat); });
+
+  if (!dynamorio_trace_dir.empty()) {
+    if (!trace_names.empty()) {
+      fmt::print("ERROR: positional trace files are mutually exclusive with --dynamorio-trace-dir.\n");
+      return 1;
+    }
+
+    champsim::dr::dr_config cfg;
+    cfg.trace_dir = dynamorio_trace_dir;
+    cfg.num_cores = static_cast<int>(NUM_CPUS);
+    cfg.use_time_feedback = true;
+    cfg.dependency_timestamps = true;
+    dr_sched = std::make_unique<champsim::dr::dr_scheduler>(cfg);
+
+    for (std::size_t i = 0; i < NUM_CPUS; ++i) {
+      trace_names.push_back(fmt::format("dynamorio:core{}", i));
+      O3_CPU& cpu = gen_environment.cpu_view().at(i);
+      traces.emplace_back(champsim::dr::dr_core_source{dr_sched.get(), static_cast<int>(i), &cpu, /*use_time=*/true});
+    }
+  } else {
+    if (trace_names.size() != NUM_CPUS) {
+      fmt::print("ERROR: expected {} trace file(s) (one per CPU), got {}.\n", NUM_CPUS, trace_names.size());
+      return 1;
+    }
+    std::transform(
+        std::begin(trace_names), std::end(trace_names), std::back_inserter(traces),
+        [knob_cloudsuite, repeat = simulation_given, i = uint8_t(0)](auto name) mutable { return get_tracereader(name, i++, knob_cloudsuite, repeat); });
+  }
 
   std::vector<champsim::phase_info> phases{
       {

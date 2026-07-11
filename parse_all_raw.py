@@ -23,7 +23,12 @@ def median(l):
     return sorted(l)[len(l)//2]
 
 def parse_study_output(fi):
-    ret = {"branch": {"freq": {}}, "taken_branch": {"freq": {}}, "data": {"lines": {}, "reuse": {}, "reuse_access": {}}, "instruction": {"lines": {}, "reuse": {}}} 
+    # The study output is optional (e.g. runs without a corresponding trace
+    # analysis, such as the live googleDR feed). If the study file/dir isn't
+    # present, default to nothing rather than erroring.
+    if not Path(fi).exists():
+        return {}
+    ret = {"branch": {"freq": {}}, "taken_branch": {"freq": {}}, "data": {"lines": {}, "reuse": {}, "reuse_access": {}}, "instruction": {"lines": {}, "reuse": {}}}
     with open(fi, 'r') as f:
         for line in f:
             line = line.strip()
@@ -104,7 +109,21 @@ def parse_one_output_file(fi, metadata, suite_workload_weights):
                 cpu = int(match.group(1))
                 simulation_file_path = match.group(2)
                 simulation_file = Path(simulation_file_path)
-                if simulation_file not in suite_workload_weights[metadata["workload"]]:
+                if simulation_file_path.startswith("dynamorio:"):
+                    # Online DynamoRIO feed (googleDR): ChampSim prints a synthetic
+                    # per-CPU name ("dynamorio:coreN") because no real per-core trace
+                    # file exists -- the whole workload is delivered via
+                    # --dynamorio-trace-dir. The suite map holds one real entry per
+                    # workload (the trace dir, weight 1.0); the N cores are concurrent
+                    # threads of that one program, not simpoints. Credit each core
+                    # weight 1.0 and drain the single entry so the completeness check
+                    # (all workload maps empty) passes.
+                    weight = 1.0
+                    wl_map = suite_workload_weights[metadata["workload"]]
+                    if wl_map:
+                        wl_map.clear()
+                    print("\tSource (DR feed): "+ simulation_file_path)
+                elif simulation_file not in suite_workload_weights[metadata["workload"]]:
                     weight = 0
                     print("WARN: Source no longer in suite: "+ str(simulation_file))
                 else:
@@ -624,24 +643,34 @@ if __name__ == "__main__":
             cfg_dict = parse_champsim_config(champsim_config)
             #print(fi)
             res_tmp = []
+            seen_workloads = set()
             for outfile in (cs_dir / suite_name).glob("*.raw"):
                 meta = parse_filename(Path(outfile).name)
                 if meta["workload"] not in workloads:
                     print(f"Workload {meta['workload']} not real! skipping")
                     continue
+                seen_workloads.add(meta["workload"])
                 meta |= {"champsim_config": cfg_dict, "suite": suite_name}
                 print(f"Parsing: {outfile}")
                 #print(f"Parsing: {outfile} with meta {meta}")
                 res_tmp += [parse_one_output_file(outfile, meta, suite_workload_weights)]
 
-            if all([len(v) == 0 for k, v in suite_workload_weights.items()]): # ensure all traces actually got ran
-            #if True:
-                # all traces got ran
+            # Accept this folder's results as long as every workload that actually
+            # produced .raw output here was fully consumed (all its simpoints/cores
+            # matched and were drained). Workloads with no .raw in this folder are
+            # simply absent and must not gate out the ones that did run -- e.g. the
+            # googleDR experiment splits one workload per core-count folder instead
+            # of running the whole suite in a single folder. For a normal full-suite
+            # folder, seen_workloads == every workload, so this is identical to the
+            # old "all traces got ran" check.
+            incomplete = {w: suite_workload_weights[w] for w in seen_workloads if len(suite_workload_weights[w]) != 0}
+            if seen_workloads and not incomplete:
+                # every workload that ran was fully covered
                 res += res_tmp
-            else:
-                # not all traces got ran. skip this res
-                print(f"*** Missing a workload for {fi} in:")
-                print(suite_workload_weights)
+            elif seen_workloads:
+                # something ran but a workload was missing simpoints/cores
+                print(f"*** Missing simpoints/cores for {fi} in:")
+                print(incomplete)
         output = OUT_DIR / (suite_name + ".json")
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(round_floats(res), indent=2))

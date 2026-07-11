@@ -20,6 +20,10 @@ override CPPFLAGS += -I$(OBJ_ROOT)
 override LDFLAGS  += -L$(TRIPLET_DIR)/lib -L$(TRIPLET_DIR)/lib/manual-link
 override LDLIBS   += -lCLI11 -llzma -lz -lbz2 -lfmt
 
+# DynamoRIO online-feed integration (opt-in via DYNAMORIO=1). Survives config.sh
+# regeneration because config.sh only rewrites _configuration.mk, not dr.mk.
+-include dr.mk
+
 .PHONY: all clean compile_commands compile_commands_clean configclean test pytest maketest
 
 test_main_name=test/bin/000-test-main

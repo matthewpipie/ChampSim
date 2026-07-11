@@ -36,6 +36,7 @@ class tracereader
     virtual ~reader_concept() = default;
     virtual ooo_model_instr operator()() = 0;
     [[nodiscard]] virtual bool eof() const = 0;
+    virtual bool has_next() = 0;
   };
 
   template <typename T>
@@ -46,6 +47,9 @@ class tracereader
     template <typename U>
     using has_eof = decltype(std::declval<U>().eof());
 
+    template <typename U>
+    using has_has_next = decltype(std::declval<U>().has_next());
+
     ooo_model_instr operator()() override { return intern_(); }
     [[nodiscard]] bool eof() const override
     {
@@ -53,6 +57,16 @@ class tracereader
         return intern_.eof();
       }
       return false; // If an eof() member function is not provided, assume the trace never ends.
+    }
+    // Signals whether an instruction is ready to be produced this cycle. File
+    // readers always have one ready; a live source (DynamoRIO) may report a
+    // front-end bubble (WAIT/IDLE) by returning false.
+    bool has_next() override
+    {
+      if constexpr (champsim::is_detected_v<has_has_next, T>) {
+        return intern_.has_next();
+      }
+      return true; // If has_next() is not provided, assume always ready.
     }
   };
 
@@ -72,6 +86,7 @@ public:
   }
 
   [[nodiscard]] auto eof() const { return pimpl_->eof(); }
+  auto has_next() { return pimpl_->has_next(); }
 };
 
 template <typename T, typename F>
