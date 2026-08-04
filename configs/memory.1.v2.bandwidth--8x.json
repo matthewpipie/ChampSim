@@ -1,0 +1,21 @@
+{
+  "name": "memory.1.v2.bandwidth--8x,",
+  "physical_memory": {
+    "data_rate": 6400,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 16,
+    "banks": 4,
+    "bank_rows": 131072,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 48,
+    "tRCD": 48,
+    "tRP": 48,
+    "tRAS": 104,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  }
+}

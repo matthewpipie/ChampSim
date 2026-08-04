@@ -1,0 +1,21 @@
+{
+  "name": "memory.1.v2.latency--2x,",
+  "physical_memory": {
+    "data_rate": 800,
+    "channels": 1,
+    "ranks": 1,
+    "bankgroups": 2,
+    "banks": 4,
+    "bank_rows": 1048576,
+    "bank_columns": 1024,
+    "channel_width": 8,
+    "wq_size": 64,
+    "rq_size": 64,
+    "tCAS": 3,
+    "tRCD": 3,
+    "tRP": 3,
+    "tRAS": 7,
+    "refresh_period": 32,
+    "refreshes_per_period": 8192
+  }
+}
