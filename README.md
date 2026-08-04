@@ -1,3 +1,13 @@
+# Personal ChampSim Fork
+
+This branch contains artifacts for my paper (TODO).
+
+To run things, install ChampSim via its original README below.
+Install the Google traces and convert them using my other repository (TODO).
+Then, you can configure a ChampSim with the various components by editing and running ./configem.sh.
+This will produce a ChampSim executable you can run in the bin/ folder following typical ChampSim config.
+
+
 # ChampSim
 
 ![GitHub](https://img.shields.io/github/license/ChampSim/ChampSim)
